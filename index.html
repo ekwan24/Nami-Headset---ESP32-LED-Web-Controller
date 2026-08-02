@@ -114,27 +114,33 @@
 
     <label>Brightness <span class="val" id="brightVal">60</span></label>
     <input type="range" min="1" max="255" value="60"
-           oninput="onSlide('BRIGHT', this.value, 'brightVal')">
+           oninput="onSlide('BRIGHT', this.value, 'brightVal')"
+           onchange="sendNow('BRIGHT', this.value)">
 
     <label>Base glow <span class="val" id="baseVal">30</span></label>
     <input type="range" min="0" max="255" value="30"
-           oninput="onSlide('BASE', this.value, 'baseVal')">
+           oninput="onSlide('BASE', this.value, 'baseVal')"
+           onchange="sendNow('BASE', this.value)">
 
-    <label>Strip speed <span class="val" id="stripVal">2</span></label>
-    <input type="range" min="1" max="20" value="2"
-           oninput="onSlideInv('STRIPSPD', this.value, 'stripVal')">
+    <label>Strip speed <span class="val" id="stripVal">Fast</span></label>
+    <input type="range" min="1" max="20" value="19"
+           oninput="onSpeed('STRIPSPD', this.value, 'stripVal')"
+           onchange="onSpeedFinal('STRIPSPD', this.value, 'stripVal')">
 
-    <label>Ring speed <span class="val" id="ringVal">2</span></label>
-    <input type="range" min="1" max="20" value="2"
-           oninput="onSlideInv('RINGSPD', this.value, 'ringVal')">
+    <label>Ring speed <span class="val" id="ringVal">Fast</span></label>
+    <input type="range" min="1" max="20" value="19"
+           oninput="onSpeed('RINGSPD', this.value, 'ringVal')"
+           onchange="onSpeedFinal('RINGSPD', this.value, 'ringVal')">
 
     <label>Wave width <span class="val" id="pulseVal">4</span></label>
     <input type="range" min="1" max="20" value="4"
-           oninput="onSlide('PULSEW', this.value, 'pulseVal')">
+           oninput="onSlide('PULSEW', this.value, 'pulseVal')"
+           onchange="sendNow('PULSEW', this.value)">
 
     <label>Ring trail <span class="val" id="trailVal">6</span></label>
     <input type="range" min="1" max="30" value="6"
-           oninput="onSlide('TRAIL', this.value, 'trailVal')">
+           oninput="onSlide('TRAIL', this.value, 'trailVal')"
+           onchange="sendNow('TRAIL', this.value)">
   </div>
 
   <div class="card">
@@ -226,40 +232,96 @@ async function send(str) {
   }
 }
 
+// ---- debounced sender: rapid drags coalesce, final value always lands ----
+let pending = {};        // cmd -> latest value waiting to send
+let debounceTimer = null;
+const DEBOUNCE_MS = 40;
+
+function queueSend(cmd, value) {
+  pending[cmd] = value;                       // keep only the newest per command
+  if (debounceTimer) return;                  // already scheduled
+  debounceTimer = setTimeout(flushPending, DEBOUNCE_MS);
+}
+
+function flushPending() {
+  for (const cmd in pending) {
+    send(cmd + ':' + pending[cmd]);
+  }
+  pending = {};
+  debounceTimer = null;
+}
+
+// immediate send, bypassing debounce (used on slider release = onchange)
+function sendNow(cmd, value) {
+  pending[cmd] = value;
+  flushPending();                             // guarantee the final value lands
+}
+
 // color picker -> COLOR:rrggbb (strip the #)
 function onColor(hex) {
-  send('COLOR:' + hex.replace('#', ''));
+  queueSend('COLOR', hex.replace('#', ''));
+}
+
+// generic slider (during drag) -> debounced send + label
+function onSlide(cmd, value, labelId) {
+  document.getElementById(labelId).textContent = value;
+  queueSend(cmd, value);
+}
+
+// SPEED sliders are INVERTED: slider right = faster (lower threshold).
+// firmware threshold = (min + max) - sliderValue  = 21 - value  (for 1..20)
+function speedThreshold(sliderValue) {
+  return 21 - parseInt(sliderValue);
+}
+function speedLabel(sliderValue) {
+  const v = parseInt(sliderValue);
+  if (v >= 17) return 'Fast';
+  if (v >= 12) return 'Med-Fast';
+  if (v >= 8)  return 'Medium';
+  if (v >= 4)  return 'Med-Slow';
+  return 'Slow';
+}
+function onSpeed(cmd, sliderValue, labelId) {
+  document.getElementById(labelId).textContent = speedLabel(sliderValue);
+  queueSend(cmd, speedThreshold(sliderValue));
+}
+function onSpeedFinal(cmd, sliderValue, labelId) {
+  document.getElementById(labelId).textContent = speedLabel(sliderValue);
+  sendNow(cmd, speedThreshold(sliderValue));
 }
 
 // default values — must match the firmware Settings struct
 const DEFAULTS = {
   color: '#80e2e5',
-  BRIGHT: 60, brightVal: 'brightVal',
-  BASE: 30,   baseVal: 'baseVal',
-  STRIPSPD: 2, stripVal: 'stripVal',
-  RINGSPD: 2,  ringVal: 'ringVal',
-  PULSEW: 4,   pulseVal: 'pulseVal',
-  TRAIL: 6,    trailVal: 'trailVal'
+  BRIGHT: 60, BASE: 30,
+  STRIPSPD: 2, RINGSPD: 2,   // firmware thresholds
+  PULSEW: 4, TRAIL: 6
 };
 
 // reset firmware AND snap every on-screen control back to defaults
 function resetAll() {
-  send('RESET');   // firmware restores its Settings() defaults
+  send('RESET');
 
-  // sync the UI so sliders/color match what the firmware just reset to
-  const sliders = document.querySelectorAll('input[type=range]');
-  const map = [
+  // brightness / base / width / trail sliders (direct values)
+  const direct = [
     ['brightVal', DEFAULTS.BRIGHT],
     ['baseVal',   DEFAULTS.BASE],
-    ['stripVal',  DEFAULTS.STRIPSPD],
-    ['ringVal',   DEFAULTS.RINGSPD],
     ['pulseVal',  DEFAULTS.PULSEW],
     ['trailVal',  DEFAULTS.TRAIL]
   ];
-  sliders.forEach((sl, i) => {
-    sl.value = map[i][1];
-    document.getElementById(map[i][0]).textContent = map[i][1];
-  });
+  // find sliders by their label ids is fragile; set by order instead
+  const ranges = document.querySelectorAll('input[type=range]');
+  // order in DOM: BRIGHT, BASE, STRIPSPD, RINGSPD, PULSEW, TRAIL
+  ranges[0].value = DEFAULTS.BRIGHT;  document.getElementById('brightVal').textContent = DEFAULTS.BRIGHT;
+  ranges[1].value = DEFAULTS.BASE;    document.getElementById('baseVal').textContent   = DEFAULTS.BASE;
+  // speed sliders: convert threshold back to slider position (21 - threshold)
+  const stripSlider = 21 - DEFAULTS.STRIPSPD;
+  const ringSlider  = 21 - DEFAULTS.RINGSPD;
+  ranges[2].value = stripSlider; document.getElementById('stripVal').textContent = speedLabel(stripSlider);
+  ranges[3].value = ringSlider;  document.getElementById('ringVal').textContent  = speedLabel(ringSlider);
+  ranges[4].value = DEFAULTS.PULSEW;  document.getElementById('pulseVal').textContent = DEFAULTS.PULSEW;
+  ranges[5].value = DEFAULTS.TRAIL;   document.getElementById('trailVal').textContent = DEFAULTS.TRAIL;
+
   document.getElementById('color').value = DEFAULTS.color;
 }
 
@@ -275,18 +337,6 @@ function onSlideInv(cmd, value, labelId) {
   send(cmd + ':' + value);
 }
 
-// throttle: BLE can choke if sliders fire too fast. Debounce sends slightly.
-let lastSend = 0;
-const origSend = send;
-send = function(str) {
-  const now = Date.now();
-  // always send button commands; lightly throttle rapid slider spam
-  if (str.startsWith('COLOR') || /:\d+$/.test(str)) {
-    if (now - lastSend < 30) return;
-    lastSend = now;
-  }
-  return origSend(str);
-};
 </script>
 </body>
 </html>
