@@ -209,7 +209,7 @@
 </div>
 
 <div style="text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px;">
-  Last updated: 2026-08-02 18:24 UTC
+  Last updated: 2026-08-02 18:41 UTC
 </div>
 
 <script>
@@ -314,11 +314,13 @@ function onSlide(cmd, value, labelId) {
 // slider position is a tick index -5..+5 (each = 10%). center 0 = default.
 // BASE_VALS holds each command's default (firmware value at center).
 const BASE_VALS = { BRIGHT: 60, BASE: 30, STRIPSPD: 2, RINGSPD: 2 };
+// minimum allowed value per command. base glow shifts hue below ~25, so floor it.
+const MIN_VALS  = { BRIGHT: 1, BASE: 25, STRIPSPD: 1, RINGSPD: 1 };
 
-// direct-percent commands: value = default * (1 + tick*0.1), rounded, min 1
+// direct-percent commands: value = default * (1 + tick*0.1), rounded, clamped to floor
 function pctValueDirect(cmd, tick) {
   const v = Math.round(BASE_VALS[cmd] * (1 + tick * 0.10));
-  return Math.max(1, v);
+  return Math.max(MIN_VALS[cmd] || 1, v);
 }
 
 // speed commands: send the TICK INDEX (-5..+5) directly.
