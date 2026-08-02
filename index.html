@@ -152,23 +152,23 @@
     </div>
     <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
 
-    <label>Strip speed <span class="val" id="stripVal">Default</span></label>
+    <label>Strip speed <span class="val" id="stripVal">0%</span></label>
     <div class="pct-wrap">
-      <input class="pct" type="range" min="-5" max="5" value="0" step="1"
+      <input class="pct" type="range" min="-3" max="3" value="0" step="1"
              oninput="onPct('STRIPSPD', this.value, 'stripVal')"
              onchange="onPctFinal('STRIPSPD', this.value, 'stripVal')">
-      <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="pct-ticks"><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i></div>
     </div>
-    <div class="tickscale"><span>slower</span><span class="mid">Def</span><span>faster</span></div>
+    <div class="tickscale"><span>slower</span><span class="mid">0%</span><span>faster</span></div>
 
-    <label>Ring speed <span class="val" id="ringVal">Default</span></label>
+    <label>Ring speed <span class="val" id="ringVal">0%</span></label>
     <div class="pct-wrap">
-      <input class="pct" type="range" min="-5" max="5" value="0" step="1"
+      <input class="pct" type="range" min="-3" max="3" value="0" step="1"
              oninput="onPct('RINGSPD', this.value, 'ringVal')"
              onchange="onPctFinal('RINGSPD', this.value, 'ringVal')">
-      <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="pct-ticks"><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i></div>
     </div>
-    <div class="tickscale"><span>slower</span><span class="mid">Def</span><span>faster</span></div>
+    <div class="tickscale"><span>slower</span><span class="mid">0%</span><span>faster</span></div>
 
     <label>Wave width <span class="val" id="pulseVal">4</span></label>
     <input type="range" min="1" max="20" value="4"
@@ -209,7 +209,7 @@
 </div>
 
 <div style="text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px;">
-  Last updated: 2026-08-02 18:17 UTC
+  Last updated: 2026-08-02 18:24 UTC
 </div>
 
 <script>
@@ -328,15 +328,16 @@ function speedThresholdFromTick(cmd, tick) {
   return parseInt(tick);   // firmware interprets the tick
 }
 
-function pctLabel(tick) {
-  if (tick === 0) return 'Default';
+function pctLabel(cmd, tick) {
+  const isSpeed = (cmd === 'STRIPSPD' || cmd === 'RINGSPD');
+  if (tick === 0) return isSpeed ? '0%' : 'Default';
   return (tick > 0 ? '+' : '') + (tick * 10) + '%';
 }
 
 // during drag
 function onPct(cmd, tickStr, labelId) {
   const tick = parseInt(tickStr);
-  document.getElementById(labelId).textContent = pctLabel(tick);
+  document.getElementById(labelId).textContent = pctLabel(cmd, tick);
   const val = (cmd === 'STRIPSPD' || cmd === 'RINGSPD')
     ? speedThresholdFromTick(cmd, tick)
     : pctValueDirect(cmd, tick);
@@ -345,7 +346,7 @@ function onPct(cmd, tickStr, labelId) {
 // on release — guarantee final value lands
 function onPctFinal(cmd, tickStr, labelId) {
   const tick = parseInt(tickStr);
-  document.getElementById(labelId).textContent = pctLabel(tick);
+  document.getElementById(labelId).textContent = pctLabel(cmd, tick);
   const val = (cmd === 'STRIPSPD' || cmd === 'RINGSPD')
     ? speedThresholdFromTick(cmd, tick)
     : pctValueDirect(cmd, tick);
@@ -364,11 +365,11 @@ function resetAll() {
 
   const ranges = document.querySelectorAll('input[type=range]');
   // DOM order: BRIGHT(pct), BASE(pct), STRIPSPD(pct), RINGSPD(pct), PULSEW, TRAIL
-  // percent sliders -> center (tick 0 = Default)
-  ['brightVal','baseVal','stripVal','ringVal'].forEach((id, i) => {
-    ranges[i].value = 0;
-    document.getElementById(id).textContent = 'Default';
-  });
+  // percent sliders -> center; labels differ (speed = 0%, others = Default)
+  ranges[0].value = 0; document.getElementById('brightVal').textContent = 'Default';
+  ranges[1].value = 0; document.getElementById('baseVal').textContent   = 'Default';
+  ranges[2].value = 0; document.getElementById('stripVal').textContent  = '0%';
+  ranges[3].value = 0; document.getElementById('ringVal').textContent   = '0%';
   // RESET set firmware brightness/base to struct defaults (60/30) — those match tick 0.
   // but speed center (tick 0) maps to threshold 11, not the struct's 2 — so push those:
   sendNow('STRIPSPD', speedThresholdFromTick('STRIPSPD', 0));
