@@ -209,7 +209,7 @@
 </div>
 
 <div style="text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px;">
-  Last updated: 2026-08-02 16:12 UTC
+  Last updated: 2026-08-02 18:17 UTC
 </div>
 
 <script>
@@ -321,13 +321,11 @@ function pctValueDirect(cmd, tick) {
   return Math.max(1, v);
 }
 
-// speed commands map to a threshold. right (+) = faster = LOWER threshold.
-// mapped DIRECTLY to a symmetric range so all 11 ticks are distinct & noticeable:
-//   tick +5 => threshold 1 (fastest), tick 0 => 11 (default center), tick -5 => 21 (slowest)
-const SPEED_CENTER = 11;   // threshold at center tick (0)
-const SPEED_STEP   = 2;    // threshold change per tick
+// speed commands: send the TICK INDEX (-5..+5) directly.
+// firmware maps it: <0 = slower (bigger frame threshold), 0 = default fast,
+// >0 = faster (pixels-per-step jumps). one value, crossover handled on-device.
 function speedThresholdFromTick(cmd, tick) {
-  return Math.max(1, SPEED_CENTER - tick * SPEED_STEP);
+  return parseInt(tick);   // firmware interprets the tick
 }
 
 function pctLabel(tick) {
