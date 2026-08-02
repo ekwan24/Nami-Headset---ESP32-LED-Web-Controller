@@ -78,26 +78,26 @@
   .disabled { opacity: .4; pointer-events: none; }
   .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .5px;
     color: var(--muted); margin: 0 0 12px; }
-  /* percent sliders: paint 11 tick marks onto the track via gradient */
-  input.pct::-webkit-slider-runnable-track {
-    height: 6px; border-radius: 3px;
-    background:
-      repeating-linear-gradient(to right,
-        var(--muted) 0, var(--muted) 2px, transparent 2px, transparent 10%),
-      var(--border);
-    background-size: 100% 6px;
+  /* percent slider wrapper holds tick overlay aligned to thumb travel */
+  .pct-wrap { position: relative; padding: 0 11px; }
+  .pct-wrap input.pct { width: 100%; }
+  /* tick overlay: 11 marks spaced across the SAME inset as the thumb travel */
+  .pct-ticks {
+    position: absolute; left: 11px; right: 11px; top: 13px;
+    height: 12px; pointer-events: none;
+    display: flex; justify-content: space-between;
   }
-  /* highlight the center (default) tick */
-  .pct-wrap { position: relative; }
-  .pct-wrap::after {
-    content: ''; position: absolute; left: 50%; top: 4px;
-    width: 3px; height: 14px; margin-left: -1.5px;
-    background: var(--accent); border-radius: 2px; pointer-events: none;
+  .pct-ticks i {
+    display: block; width: 2px; height: 8px;
+    background: var(--muted); border-radius: 1px;
+  }
+  .pct-ticks i.mid {
+    height: 14px; width: 3px; margin-top: -3px; background: var(--accent);
   }
   .tickscale {
     display: flex; justify-content: space-between;
     font-size: 10px; color: var(--muted);
-    padding: 0 6px; margin: -2px 0 14px;
+    padding: 0 8px; margin: 2px 0 14px;
   }
   .tickscale .mid { color: var(--accent); font-weight: 700; }
 </style>
@@ -139,6 +139,7 @@
       <input class="pct" type="range" min="-5" max="5" value="0" step="1"
              oninput="onPct('BRIGHT', this.value, 'brightVal')"
              onchange="onPctFinal('BRIGHT', this.value, 'brightVal')">
+      <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
     <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
 
@@ -147,6 +148,7 @@
       <input class="pct" type="range" min="-5" max="5" value="0" step="1"
              oninput="onPct('BASE', this.value, 'baseVal')"
              onchange="onPctFinal('BASE', this.value, 'baseVal')">
+      <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
     <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
 
@@ -155,6 +157,7 @@
       <input class="pct" type="range" min="-5" max="5" value="0" step="1"
              oninput="onPct('STRIPSPD', this.value, 'stripVal')"
              onchange="onPctFinal('STRIPSPD', this.value, 'stripVal')">
+      <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
     <div class="tickscale"><span>slower</span><span class="mid">Def</span><span>faster</span></div>
 
@@ -163,6 +166,7 @@
       <input class="pct" type="range" min="-5" max="5" value="0" step="1"
              oninput="onPct('RINGSPD', this.value, 'ringVal')"
              onchange="onPctFinal('RINGSPD', this.value, 'ringVal')">
+      <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
     <div class="tickscale"><span>slower</span><span class="mid">Def</span><span>faster</span></div>
 
@@ -318,14 +322,12 @@ function pctValueDirect(cmd, tick) {
 }
 
 // speed commands map to a threshold. right (+) = faster = LOWER threshold.
-// spread 11 distinct thresholds around the default so every tick changes speed.
-// tick +5 -> fastest (threshold 1), tick -5 -> slowest (larger threshold).
+// mapped DIRECTLY to a symmetric range so all 11 ticks are distinct & noticeable:
+//   tick +5 => threshold 1 (fastest), tick 0 => 11 (default center), tick -5 => 21 (slowest)
+const SPEED_CENTER = 11;   // threshold at center tick (0)
+const SPEED_STEP   = 2;    // threshold change per tick
 function speedThresholdFromTick(cmd, tick) {
-  const def = BASE_VALS[cmd];            // default threshold (2)
-  // faster side: shrink toward 1; slower side: grow. use a step of ~1 per tick
-  // +5 => 1, 0 => def, -5 => def+ (slower). clamp to >=1.
-  let thr = def - tick;                  // tick + => smaller threshold => faster
-  return Math.max(1, thr);
+  return Math.max(1, SPEED_CENTER - tick * SPEED_STEP);
 }
 
 function pctLabel(tick) {
@@ -369,6 +371,10 @@ function resetAll() {
     ranges[i].value = 0;
     document.getElementById(id).textContent = 'Default';
   });
+  // RESET set firmware brightness/base to struct defaults (60/30) — those match tick 0.
+  // but speed center (tick 0) maps to threshold 11, not the struct's 2 — so push those:
+  sendNow('STRIPSPD', speedThresholdFromTick('STRIPSPD', 0));
+  sendNow('RINGSPD',  speedThresholdFromTick('RINGSPD', 0));
   // wave width / ring trail -> their raw defaults
   ranges[4].value = DEFAULTS.PULSEW; document.getElementById('pulseVal').textContent = DEFAULTS.PULSEW;
   ranges[5].value = DEFAULTS.TRAIL;  document.getElementById('trailVal').textContent = DEFAULTS.TRAIL;
