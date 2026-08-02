@@ -329,18 +329,6 @@ function resetAll() {
   document.getElementById('color').value = DEFAULTS.color;
 }
 
-// generic slider -> CMD:value, and update the label
-function onSlide(cmd, value, labelId) {
-  document.getElementById(labelId).textContent = value;
-  send(cmd + ':' + value);
-}
-
-// inverted-feel slider: label shows the raw threshold (higher = slower)
-function onSlideInv(cmd, value, labelId) {
-  document.getElementById(labelId).textContent = value;
-  send(cmd + ':' + value);
-}
-
 </script>
 </body>
 </html>
