@@ -111,6 +111,7 @@
   <div class="status">
     <span class="dot" id="dot"></span>
     <span id="statusText">Not connected</span>
+    <span id="signal" style="margin-left:auto; font-size:13px; color:var(--muted);"></span>
   </div>
   <button class="wide" id="connectBtn" onclick="connect()">Connect to ESP32-LED</button>
 </div>
@@ -209,12 +210,13 @@
 </div>
 
 <div style="text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px;">
-  Last updated: 2026-08-02 18:59 UTC
+  Last updated: 2026-08-02 19:36 UTC
 </div>
 
 <script>
 const SERVICE_UUID = '12345678-1234-5678-1234-56789abcdef0';
 const CHAR_UUID    = '12345678-1234-5678-1234-56789abcdef1';
+const RSSI_UUID    = '12345678-1234-5678-1234-56789abcdef2';
 
 let characteristic = null;
 let device = null;
@@ -242,6 +244,15 @@ async function connect() {
     const service = await server.getPrimaryService(SERVICE_UUID);
     characteristic = await service.getCharacteristic(CHAR_UUID);
 
+    // subscribe to RSSI (signal strength) notifications
+    try {
+      const rssiCh = await service.getCharacteristic(RSSI_UUID);
+      await rssiCh.startNotifications();
+      rssiCh.addEventListener('characteristicvaluechanged', onRssi);
+    } catch (e) {
+      console.log('RSSI characteristic not available:', e);
+    }
+
     dot.classList.add('on');
     statusText.textContent = 'Connected';
     controls.classList.remove('disabled');
@@ -260,9 +271,29 @@ function onDisconnect() {
   characteristic = null;
   dot.classList.remove('on');
   statusText.textContent = 'Disconnected';
+  document.getElementById('signal').textContent = '';
   controls.classList.add('disabled');
   connectBtn.textContent = 'Connect to ESP32-LED';
   connectBtn.onclick = connect;
+}
+
+// receive RSSI notifications (e.g. "-58") and show signal strength
+function onRssi(event) {
+  const text = new TextDecoder().decode(event.target.value).trim();
+  const rssi = parseInt(text);
+  if (isNaN(rssi)) return;
+
+  // map dBm -> 0-4 bars
+  let bars, label;
+  if      (rssi >= -55) { bars = 4; label = 'excellent'; }
+  else if (rssi >= -67) { bars = 3; label = 'good'; }
+  else if (rssi >= -78) { bars = 2; label = 'fair'; }
+  else if (rssi >= -88) { bars = 1; label = 'weak'; }
+  else                  { bars = 0; label = 'very weak'; }
+
+  const filled = '█'.repeat(bars);
+  const empty  = '░'.repeat(4 - bars);
+  document.getElementById('signal').textContent = `${filled}${empty} ${rssi}dBm`;
 }
 
 async function send(str) {
