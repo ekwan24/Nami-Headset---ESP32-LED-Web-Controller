@@ -134,25 +134,25 @@
   <div class="card">
     <div class="section-title">Tuning</div>
 
-    <label>Brightness <span class="val" id="brightVal">Default</span></label>
+    <label>Master Brightness <span class="val" id="brightVal">0%</span></label>
     <div class="pct-wrap">
       <input class="pct" type="range" min="-5" max="5" value="0" step="1"
              oninput="onPct('BRIGHT', this.value, 'brightVal')"
              onchange="onPctFinal('BRIGHT', this.value, 'brightVal')">
       <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
-    <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
+    <div class="tickscale"><span>-50%</span><span class="mid">0%</span><span>+50%</span></div>
 
-    <label>Base glow <span class="val" id="baseVal">Default</span></label>
+    <label>Base Brightness <span class="val" id="baseVal">0%</span></label>
     <div class="pct-wrap">
       <input class="pct" type="range" min="-5" max="5" value="0" step="1"
              oninput="onPct('BASE', this.value, 'baseVal')"
              onchange="onPctFinal('BASE', this.value, 'baseVal')">
       <div class="pct-ticks"><i></i><i></i><i></i><i></i><i></i><i class="mid"></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
-    <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
+    <div class="tickscale"><span>-50%</span><span class="mid">0%</span><span>+50%</span></div>
 
-    <label>Strip speed <span class="val" id="stripVal">0%</span></label>
+    <label>Strip Speed <span class="val" id="stripVal">0%</span></label>
     <div class="pct-wrap">
       <input class="pct" type="range" min="-3" max="3" value="0" step="1"
              oninput="onPct('STRIPSPD', this.value, 'stripVal')"
@@ -161,7 +161,7 @@
     </div>
     <div class="tickscale"><span>slower</span><span class="mid">0%</span><span>faster</span></div>
 
-    <label>Ring speed <span class="val" id="ringVal">0%</span></label>
+    <label>Ring Speed <span class="val" id="ringVal">0%</span></label>
     <div class="pct-wrap">
       <input class="pct" type="range" min="-3" max="3" value="0" step="1"
              oninput="onPct('RINGSPD', this.value, 'ringVal')"
@@ -170,12 +170,12 @@
     </div>
     <div class="tickscale"><span>slower</span><span class="mid">0%</span><span>faster</span></div>
 
-    <label>Wave width <span class="val" id="pulseVal">4</span></label>
+    <label>Wave Trail Length <span class="val" id="pulseVal">4</span></label>
     <input type="range" min="1" max="20" value="4"
            oninput="onSlide('PULSEW', this.value, 'pulseVal')"
            onchange="sendNow('PULSEW', this.value)">
 
-    <label>Ring trail <span class="val" id="trailVal">6</span></label>
+    <label>Ring Trail Length <span class="val" id="trailVal">6</span></label>
     <input type="range" min="1" max="30" value="6"
            oninput="onSlide('TRAIL', this.value, 'trailVal')"
            onchange="sendNow('TRAIL', this.value)">
@@ -209,7 +209,7 @@
 </div>
 
 <div style="text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px;">
-  Last updated: 2026-08-02 18:41 UTC
+  Last updated: 2026-08-02 18:49 UTC
 </div>
 
 <script>
@@ -331,8 +331,7 @@ function speedThresholdFromTick(cmd, tick) {
 }
 
 function pctLabel(cmd, tick) {
-  const isSpeed = (cmd === 'STRIPSPD' || cmd === 'RINGSPD');
-  if (tick === 0) return isSpeed ? '0%' : 'Default';
+  if (tick === 0) return '0%';
   return (tick > 0 ? '+' : '') + (tick * 10) + '%';
 }
 
@@ -368,8 +367,8 @@ function resetAll() {
   const ranges = document.querySelectorAll('input[type=range]');
   // DOM order: BRIGHT(pct), BASE(pct), STRIPSPD(pct), RINGSPD(pct), PULSEW, TRAIL
   // percent sliders -> center; labels differ (speed = 0%, others = Default)
-  ranges[0].value = 0; document.getElementById('brightVal').textContent = 'Default';
-  ranges[1].value = 0; document.getElementById('baseVal').textContent   = 'Default';
+  ranges[0].value = 0; document.getElementById('brightVal').textContent = '0%';
+  ranges[1].value = 0; document.getElementById('baseVal').textContent   = '0%';
   ranges[2].value = 0; document.getElementById('stripVal').textContent  = '0%';
   ranges[3].value = 0; document.getElementById('ringVal').textContent   = '0%';
   // RESET set firmware brightness/base to struct defaults (60/30) — those match tick 0.
