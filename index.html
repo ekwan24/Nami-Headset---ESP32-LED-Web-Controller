@@ -100,6 +100,7 @@
       <button id="onBtn" onclick="send('ON')">Lights ON</button>
       <button class="off-btn" id="offBtn" onclick="send('OFF')">Lights OFF</button>
     </div>
+    <button class="secondary wide" style="margin-top:10px" onclick="resetAll()">Reset to Defaults</button>
   </div>
 
   <div class="card">
@@ -228,6 +229,38 @@ async function send(str) {
 // color picker -> COLOR:rrggbb (strip the #)
 function onColor(hex) {
   send('COLOR:' + hex.replace('#', ''));
+}
+
+// default values — must match the firmware Settings struct
+const DEFAULTS = {
+  color: '#80e2e5',
+  BRIGHT: 60, brightVal: 'brightVal',
+  BASE: 30,   baseVal: 'baseVal',
+  STRIPSPD: 2, stripVal: 'stripVal',
+  RINGSPD: 2,  ringVal: 'ringVal',
+  PULSEW: 4,   pulseVal: 'pulseVal',
+  TRAIL: 6,    trailVal: 'trailVal'
+};
+
+// reset firmware AND snap every on-screen control back to defaults
+function resetAll() {
+  send('RESET');   // firmware restores its Settings() defaults
+
+  // sync the UI so sliders/color match what the firmware just reset to
+  const sliders = document.querySelectorAll('input[type=range]');
+  const map = [
+    ['brightVal', DEFAULTS.BRIGHT],
+    ['baseVal',   DEFAULTS.BASE],
+    ['stripVal',  DEFAULTS.STRIPSPD],
+    ['ringVal',   DEFAULTS.RINGSPD],
+    ['pulseVal',  DEFAULTS.PULSEW],
+    ['trailVal',  DEFAULTS.TRAIL]
+  ];
+  sliders.forEach((sl, i) => {
+    sl.value = map[i][1];
+    document.getElementById(map[i][0]).textContent = map[i][1];
+  });
+  document.getElementById('color').value = DEFAULTS.color;
 }
 
 // generic slider -> CMD:value, and update the label
