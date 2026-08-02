@@ -78,6 +78,28 @@
   .disabled { opacity: .4; pointer-events: none; }
   .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .5px;
     color: var(--muted); margin: 0 0 12px; }
+  /* percent sliders: paint 11 tick marks onto the track via gradient */
+  input.pct::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px;
+    background:
+      repeating-linear-gradient(to right,
+        var(--muted) 0, var(--muted) 2px, transparent 2px, transparent 10%),
+      var(--border);
+    background-size: 100% 6px;
+  }
+  /* highlight the center (default) tick */
+  .pct-wrap { position: relative; }
+  .pct-wrap::after {
+    content: ''; position: absolute; left: 50%; top: 4px;
+    width: 3px; height: 14px; margin-left: -1.5px;
+    background: var(--accent); border-radius: 2px; pointer-events: none;
+  }
+  .tickscale {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--muted);
+    padding: 0 6px; margin: -2px 0 14px;
+  }
+  .tickscale .mid { color: var(--accent); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -112,25 +134,37 @@
   <div class="card">
     <div class="section-title">Tuning</div>
 
-    <label>Brightness <span class="val" id="brightVal">60</span></label>
-    <input type="range" min="1" max="255" value="60"
-           oninput="onSlide('BRIGHT', this.value, 'brightVal')"
-           onchange="sendNow('BRIGHT', this.value)">
+    <label>Brightness <span class="val" id="brightVal">Default</span></label>
+    <div class="pct-wrap">
+      <input class="pct" type="range" min="-5" max="5" value="0" step="1"
+             oninput="onPct('BRIGHT', this.value, 'brightVal')"
+             onchange="onPctFinal('BRIGHT', this.value, 'brightVal')">
+    </div>
+    <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
 
-    <label>Base glow <span class="val" id="baseVal">30</span></label>
-    <input type="range" min="0" max="255" value="30"
-           oninput="onSlide('BASE', this.value, 'baseVal')"
-           onchange="sendNow('BASE', this.value)">
+    <label>Base glow <span class="val" id="baseVal">Default</span></label>
+    <div class="pct-wrap">
+      <input class="pct" type="range" min="-5" max="5" value="0" step="1"
+             oninput="onPct('BASE', this.value, 'baseVal')"
+             onchange="onPctFinal('BASE', this.value, 'baseVal')">
+    </div>
+    <div class="tickscale"><span>-50%</span><span class="mid">Def</span><span>+50%</span></div>
 
-    <label>Strip speed <span class="val" id="stripVal">Fast</span></label>
-    <input type="range" min="1" max="20" value="19"
-           oninput="onSpeed('STRIPSPD', this.value, 'stripVal')"
-           onchange="onSpeedFinal('STRIPSPD', this.value, 'stripVal')">
+    <label>Strip speed <span class="val" id="stripVal">Default</span></label>
+    <div class="pct-wrap">
+      <input class="pct" type="range" min="-5" max="5" value="0" step="1"
+             oninput="onPct('STRIPSPD', this.value, 'stripVal')"
+             onchange="onPctFinal('STRIPSPD', this.value, 'stripVal')">
+    </div>
+    <div class="tickscale"><span>slower</span><span class="mid">Def</span><span>faster</span></div>
 
-    <label>Ring speed <span class="val" id="ringVal">Fast</span></label>
-    <input type="range" min="1" max="20" value="19"
-           oninput="onSpeed('RINGSPD', this.value, 'ringVal')"
-           onchange="onSpeedFinal('RINGSPD', this.value, 'ringVal')">
+    <label>Ring speed <span class="val" id="ringVal">Default</span></label>
+    <div class="pct-wrap">
+      <input class="pct" type="range" min="-5" max="5" value="0" step="1"
+             oninput="onPct('RINGSPD', this.value, 'ringVal')"
+             onchange="onPctFinal('RINGSPD', this.value, 'ringVal')">
+    </div>
+    <div class="tickscale"><span>slower</span><span class="mid">Def</span><span>faster</span></div>
 
     <label>Wave width <span class="val" id="pulseVal">4</span></label>
     <input type="range" min="1" max="20" value="4"
@@ -272,33 +306,55 @@ function onSlide(cmd, value, labelId) {
   queueSend(cmd, value);
 }
 
-// SPEED sliders are INVERTED: slider right = faster (lower threshold).
-// firmware threshold = (min + max) - sliderValue  = 21 - value  (for 1..20)
-function speedThreshold(sliderValue) {
-  return 21 - parseInt(sliderValue);
+// ---- PERCENT-TICK SLIDERS (brightness, base, strip speed, ring speed) ----
+// slider position is a tick index -5..+5 (each = 10%). center 0 = default.
+// BASE_VALS holds each command's default (firmware value at center).
+const BASE_VALS = { BRIGHT: 60, BASE: 30, STRIPSPD: 2, RINGSPD: 2 };
+
+// direct-percent commands: value = default * (1 + tick*0.1), rounded, min 1
+function pctValueDirect(cmd, tick) {
+  const v = Math.round(BASE_VALS[cmd] * (1 + tick * 0.10));
+  return Math.max(1, v);
 }
-function speedLabel(sliderValue) {
-  const v = parseInt(sliderValue);
-  if (v >= 17) return 'Fast';
-  if (v >= 12) return 'Med-Fast';
-  if (v >= 8)  return 'Medium';
-  if (v >= 4)  return 'Med-Slow';
-  return 'Slow';
+
+// speed commands map to a threshold. right (+) = faster = LOWER threshold.
+// spread 11 distinct thresholds around the default so every tick changes speed.
+// tick +5 -> fastest (threshold 1), tick -5 -> slowest (larger threshold).
+function speedThresholdFromTick(cmd, tick) {
+  const def = BASE_VALS[cmd];            // default threshold (2)
+  // faster side: shrink toward 1; slower side: grow. use a step of ~1 per tick
+  // +5 => 1, 0 => def, -5 => def+ (slower). clamp to >=1.
+  let thr = def - tick;                  // tick + => smaller threshold => faster
+  return Math.max(1, thr);
 }
-function onSpeed(cmd, sliderValue, labelId) {
-  document.getElementById(labelId).textContent = speedLabel(sliderValue);
-  queueSend(cmd, speedThreshold(sliderValue));
+
+function pctLabel(tick) {
+  if (tick === 0) return 'Default';
+  return (tick > 0 ? '+' : '') + (tick * 10) + '%';
 }
-function onSpeedFinal(cmd, sliderValue, labelId) {
-  document.getElementById(labelId).textContent = speedLabel(sliderValue);
-  sendNow(cmd, speedThreshold(sliderValue));
+
+// during drag
+function onPct(cmd, tickStr, labelId) {
+  const tick = parseInt(tickStr);
+  document.getElementById(labelId).textContent = pctLabel(tick);
+  const val = (cmd === 'STRIPSPD' || cmd === 'RINGSPD')
+    ? speedThresholdFromTick(cmd, tick)
+    : pctValueDirect(cmd, tick);
+  queueSend(cmd, val);
+}
+// on release — guarantee final value lands
+function onPctFinal(cmd, tickStr, labelId) {
+  const tick = parseInt(tickStr);
+  document.getElementById(labelId).textContent = pctLabel(tick);
+  const val = (cmd === 'STRIPSPD' || cmd === 'RINGSPD')
+    ? speedThresholdFromTick(cmd, tick)
+    : pctValueDirect(cmd, tick);
+  sendNow(cmd, val);
 }
 
 // default values — must match the firmware Settings struct
 const DEFAULTS = {
   color: '#80e2e5',
-  BRIGHT: 60, BASE: 30,
-  STRIPSPD: 2, RINGSPD: 2,   // firmware thresholds
   PULSEW: 4, TRAIL: 6
 };
 
@@ -306,25 +362,16 @@ const DEFAULTS = {
 function resetAll() {
   send('RESET');
 
-  // brightness / base / width / trail sliders (direct values)
-  const direct = [
-    ['brightVal', DEFAULTS.BRIGHT],
-    ['baseVal',   DEFAULTS.BASE],
-    ['pulseVal',  DEFAULTS.PULSEW],
-    ['trailVal',  DEFAULTS.TRAIL]
-  ];
-  // find sliders by their label ids is fragile; set by order instead
   const ranges = document.querySelectorAll('input[type=range]');
-  // order in DOM: BRIGHT, BASE, STRIPSPD, RINGSPD, PULSEW, TRAIL
-  ranges[0].value = DEFAULTS.BRIGHT;  document.getElementById('brightVal').textContent = DEFAULTS.BRIGHT;
-  ranges[1].value = DEFAULTS.BASE;    document.getElementById('baseVal').textContent   = DEFAULTS.BASE;
-  // speed sliders: convert threshold back to slider position (21 - threshold)
-  const stripSlider = 21 - DEFAULTS.STRIPSPD;
-  const ringSlider  = 21 - DEFAULTS.RINGSPD;
-  ranges[2].value = stripSlider; document.getElementById('stripVal').textContent = speedLabel(stripSlider);
-  ranges[3].value = ringSlider;  document.getElementById('ringVal').textContent  = speedLabel(ringSlider);
-  ranges[4].value = DEFAULTS.PULSEW;  document.getElementById('pulseVal').textContent = DEFAULTS.PULSEW;
-  ranges[5].value = DEFAULTS.TRAIL;   document.getElementById('trailVal').textContent = DEFAULTS.TRAIL;
+  // DOM order: BRIGHT(pct), BASE(pct), STRIPSPD(pct), RINGSPD(pct), PULSEW, TRAIL
+  // percent sliders -> center (tick 0 = Default)
+  ['brightVal','baseVal','stripVal','ringVal'].forEach((id, i) => {
+    ranges[i].value = 0;
+    document.getElementById(id).textContent = 'Default';
+  });
+  // wave width / ring trail -> their raw defaults
+  ranges[4].value = DEFAULTS.PULSEW; document.getElementById('pulseVal').textContent = DEFAULTS.PULSEW;
+  ranges[5].value = DEFAULTS.TRAIL;  document.getElementById('trailVal').textContent = DEFAULTS.TRAIL;
 
   document.getElementById('color').value = DEFAULTS.color;
 }
