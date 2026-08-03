@@ -29,6 +29,7 @@
   .bars i:nth-child(1){height:5px} .bars i:nth-child(2){height:8px}
   .bars i:nth-child(3){height:11px} .bars i:nth-child(4){height:14px}
   .bars i.lit { background:var(--accent); }
+  #sigLabel { font-size:12px; color:var(--muted); min-width:40px; }
   .err { font-size:12px; color:var(--danger); margin-top:8px; min-height:16px; }
   button { font-family:inherit; font-size:15px; font-weight:600; border:none;
     border-radius:10px; padding:12px 16px; color:#0d1117; background:var(--accent);
@@ -41,6 +42,7 @@
   /* Card 2 + 3 side by side 1:4 */
   .row24 { display:flex; gap:14px; align-items:stretch; margin-bottom:14px; }
   .row24 .card { margin-bottom:0; }
+  .disconnected-dim { opacity:.35; pointer-events:none; transition:opacity .2s; }
   .lights-card { flex:1; display:flex; flex-direction:column; padding:14px 8px; }
   .lights-card .card-h { text-align:center; }
   .qa-card { flex:4; }
@@ -71,7 +73,7 @@
   /* Card 3: Tuning */
   .tuning-card { transition:opacity .2s; }
   .tuning-card.disabled { opacity:.35; pointer-events:none; }
-  .tuning-who { font-size:13px; color:var(--accent); font-weight:600; margin-bottom:14px; }
+  .tuning-who { font-size:16px; color:var(--text); font-weight:700; margin:0 0 14px; }
   .divider { height:1px; background:var(--border); margin:14px 0; }
   .field { margin-bottom:14px; }
   .field:last-child { margin-bottom:0; }
@@ -100,14 +102,15 @@
     </div>
     <div class="stat">
       <span class="bars" id="bars"><i></i><i></i><i></i><i></i></span>
+      <span id="sigLabel"></span>
     </div>
   </div>
   <button class="wide" id="connBtn" onclick="toggleConnect()">Connect</button>
   <div class="err" id="errMsg"></div>
 </div>
 
-<!-- ── CARD 2 (Lights) + CARD 3 (Quick Access) ───────── -->
-<div class="row24">
+<!-- ── CARD 2 (Lights) + CARD 3 (Patterns) ────────────── -->
+<div class="row24 disconnected-dim" id="row24">
   <div class="card lights-card">
     <div class="card-h">Lights</div>
     <div class="toggle-wrap">
@@ -118,7 +121,7 @@
     </div>
   </div>
   <div class="card qa-card">
-    <div class="card-h">Quick Access</div>
+    <div class="card-h" style="text-align:center">Patterns</div>
     <div class="quick">
       <button class="qbtn" onclick="selectQA(0,this)"><span class="ql">Solid</span></button>
       <button class="qbtn" onclick="selectQA(1,this)"><span class="ql">Breathe</span></button>
@@ -295,6 +298,11 @@ function setConnState(s) {
   if (s==='disconnected') {
     txt.textContent='Disconnected'; btn.textContent='Connect'; btn.disabled=false;
     qa('#bars i').forEach(i=>i.classList.remove('lit'));
+    q('#sigLabel').textContent='';
+    // dim cards 2+ and strip shimmer animation
+    q('#row24').classList.add('disconnected-dim');
+    q('#tuningCard').classList.add('disconnected-dim');
+    qa('.qbtn').forEach(b=>b.classList.remove('live'));
   } else if (s==='connecting') {
     dot.classList.add('connecting'); txt.textContent='Connecting…';
     btn.textContent='Connecting…'; btn.disabled=true;
@@ -302,6 +310,9 @@ function setConnState(s) {
     dot.classList.add('on'); txt.textContent='Connected';
     btn.textContent='Disconnect'; btn.disabled=false;
     qa('#bars i').forEach((i,n)=>{ if(n<3) i.classList.add('lit'); });
+    // enable cards 2+
+    q('#row24').classList.remove('disconnected-dim');
+    q('#tuningCard').classList.remove('disconnected-dim');
   }
 }
 
@@ -312,6 +323,7 @@ function onRssi(ev) {
   if (isNaN(rssi)) return;
   const b = rssi>=-55?4:rssi>=-67?3:rssi>=-78?2:rssi>=-88?1:0;
   qa('#bars i').forEach((i,n)=>{ i.classList.toggle('lit', n<b); });
+  q('#sigLabel').textContent = b>=3 ? 'High' : b>=2 ? 'Medium' : 'Low';
 }
 
 // ── LIGHTS TOGGLE ──────────────────────────────────────
