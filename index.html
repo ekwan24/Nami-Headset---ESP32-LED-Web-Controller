@@ -164,6 +164,14 @@
            onchange="sendNow('MAXBR',this.value)">
   </div>
 
+  <!-- Default 3 (Waves) specific: Master Brightness (scales base + trail proportionally) -->
+  <div class="field hidden" data-qa="2" id="fWaveMaster">
+    <label>Master Brightness <span class="val" id="vWaveMaster">100%</span></label>
+    <input type="range" min="0" max="100" value="100"
+           oninput="onPct('WAVEBRIGHT','vWaveMaster',this.value)"
+           onchange="sendNow('WAVEBRIGHT',this.value)">
+  </div>
+
   <!-- Default 3 (Waves) specific: Brightness (peak) -->
   <div class="field hidden" data-qa="2" id="fWaveBr">
     <label>Brightness <span class="val" id="vWaveBr">25%</span></label>
@@ -245,7 +253,7 @@ let uniColor  = '#80e2e5';
 const QA_DEFAULTS = {
   0: { solidbr:30 },                          // Solid: brightness
   1: { minbr:10, maxbr:30, spd:0 },           // Breathe
-  2: { wavebr:25, trailbr:100, base:15, spd:0, trail:20 }  // Waves
+  2: { wavemaster:100, wavebr:25, trailbr:100, base:15, spd:0, trail:20 }  // Waves
 };
 
 // ── HELPERS ────────────────────────────────────────────
@@ -359,6 +367,7 @@ function selectQA(idx, btn) {
 
   // load pattern-specific defaults into the controls for this QA
   const def = QA_DEFAULTS[idx] || {};
+  if (def.wavemaster !== undefined){ q('#fWaveMaster input').value=def.wavemaster; q('#vWaveMaster').textContent=def.wavemaster+'%'; }
   if (def.solidbr !== undefined){ q('#fSolidBr input').value=def.solidbr; q('#vSolidBr').textContent=def.solidbr+'%'; }
   if (def.minbr   !== undefined){ q('#fMinBr input').value=def.minbr;    q('#vMinBr').textContent=def.minbr+'%'; }
   if (def.maxbr   !== undefined){ q('#fMaxBr input').value=def.maxbr;    q('#vMaxBr').textContent=def.maxbr+'%'; }
