@@ -107,7 +107,6 @@
   input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:var(--border); }
   input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px;
     border-radius:50%; background:var(--accent); margin-top:-7px; }
-
   /* action buttons */
   .action-row { display:flex; gap:10px; margin-bottom:10px; }
   .abtn { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
@@ -155,6 +154,19 @@
       <button class="qbtn" onclick="runQA(0,this)"><span class="ql">Default 1</span></button>
       <button class="qbtn" onclick="runQA(1,this)"><span class="ql">Default 2</span></button>
       <button class="qbtn" onclick="runQA(2,this)"><span class="ql">Default 3</span></button>
+    </div>
+    <div id="qaControls" style="margin-top:14px; opacity:.35; pointer-events:none;">
+      <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:6px;">
+        Color</label>
+      <input type="color" id="qaColor" value="#80e2e5"
+             style="width:100%;height:44px;border:none;border-radius:8px;background:none;padding:0;cursor:pointer;"
+             oninput="onQAColor(this.value)">
+      <label style="font-size:13px;color:var(--muted);display:block;margin:12px 0 6px;">
+        Master Brightness <span id="qabrVal" style="color:var(--accent);font-weight:600;float:right;">100%</span></label>
+      <input type="range" id="qaBright" min="0" max="100" value="100"
+             style="width:100%;height:30px;-webkit-appearance:none;background:transparent;"
+             oninput="onQABright(this.value)"
+             onchange="sendNow('QABRIGHT',this.value)">
     </div>
   </div>
 </div>
@@ -380,7 +392,23 @@ function toggleLights() {
 function runQA(idx, btn) {
   running={type:'qa', idx, el:btn};
   send('QA:'+idx);
+  enableQAControls(true);
   paint();
+}
+
+function enableQAControls(on) {
+  const ctrl = q('#qaControls');
+  ctrl.style.opacity      = on ? '1'    : '.35';
+  ctrl.style.pointerEvents = on ? 'auto' : 'none';
+}
+
+function onQAColor(hex) {
+  qSend('QACOLOR', hex.replace('#',''));
+}
+
+function onQABright(val) {
+  q('#qabrVal').textContent = val+'%';
+  qSend('QABRIGHT', val);
 }
 
 // ── PRESET TABS ───────────────────────────────────────────
@@ -414,10 +442,14 @@ function paint() {
     if (running.type==='qa') {
       running.el.classList.add('selected');
       if (lightsOn) running.el.classList.add('live');
+      enableQAControls(true);
     } else {
       running.el.classList.add('running');
       if (lightsOn) running.el.classList.add('live');
+      enableQAControls(false);
     }
+  } else {
+    enableQAControls(false);
   }
 
   // Run button: green always; shimmer only when selected preset = running
