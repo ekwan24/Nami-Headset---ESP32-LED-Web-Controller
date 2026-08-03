@@ -172,20 +172,12 @@
            onchange="sendNow('WAVEBRIGHT',this.value)">
   </div>
 
-  <!-- Default 3 (Waves) specific: Brightness (peak) -->
+  <!-- Default 3 (Waves) specific: Peak Brightness (brightness at head of trail) -->
   <div class="field hidden" data-qa="2" id="fWaveBr">
-    <label>Brightness <span class="val" id="vWaveBr">25%</span></label>
+    <label>Peak Brightness <span class="val" id="vWaveBr">25%</span></label>
     <input type="range" min="0" max="100" value="25"
            oninput="onPct('BRIGHT','vWaveBr',this.value)"
            onchange="sendNow('BRIGHT',this.value)">
-  </div>
-
-  <!-- Waves: Trail Brightness (scales trail, preserves fade) -->
-  <div class="field hidden" data-qa="2" id="fTrailBr">
-    <label>Trail Brightness <span class="val" id="vTrailBr">100%</span></label>
-    <input type="range" min="0" max="100" value="100"
-           oninput="onPct('TRAILBR','vTrailBr',this.value)"
-           onchange="sendNow('TRAILBR',this.value)">
   </div>
 
   <!-- Default 2 + 3 (Breathe + Waves) -->
@@ -253,7 +245,7 @@ let uniColor  = '#80e2e5';
 const QA_DEFAULTS = {
   0: { solidbr:30 },                          // Solid: brightness
   1: { minbr:10, maxbr:30, spd:0 },           // Breathe
-  2: { wavemaster:100, wavebr:25, trailbr:100, base:15, spd:0, trail:20 }  // Waves
+  2: { wavemaster:100, wavebr:25, base:15, spd:0, trail:20 }  // Waves
 };
 
 // ── HELPERS ────────────────────────────────────────────
@@ -372,7 +364,6 @@ function selectQA(idx, btn) {
   if (def.minbr   !== undefined){ q('#fMinBr input').value=def.minbr;    q('#vMinBr').textContent=def.minbr+'%'; }
   if (def.maxbr   !== undefined){ q('#fMaxBr input').value=def.maxbr;    q('#vMaxBr').textContent=def.maxbr+'%'; }
   if (def.wavebr  !== undefined){ q('#fWaveBr input').value=def.wavebr;  q('#vWaveBr').textContent=def.wavebr+'%'; }
-  if (def.trailbr !== undefined){ q('#fTrailBr input').value=def.trailbr; q('#vTrailBr').textContent=def.trailbr+'%'; }
   if (def.spd     !== undefined){ q('#fSpd input').value=def.spd;        q('#vSpd').textContent='0%'; }
   if (def.base    !== undefined){ q('#fBase input').value=def.base;      q('#vBase').textContent=def.base+'%'; }
   if (def.trail   !== undefined){ q('#fTrail input').value=def.trail;    q('#vTrail').textContent=def.trail; }
