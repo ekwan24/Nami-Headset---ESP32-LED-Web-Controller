@@ -322,6 +322,9 @@ async function toggleConnect() {
       rc.addEventListener('characteristicvaluechanged', onRssi);
     } catch(e) { console.log('RSSI not available'); }
     setConnState('connected');
+    // sync firmware with current UI state
+    send('EDITP:'+selectedTabIdx);
+    send('SEG:'+editSeg);
   } catch(e) {
     const msg = e.message || String(e);
     // short messages only (keep status row intact)
@@ -385,7 +388,8 @@ function selectTab(el, idx) {
   selectedTabEl  = el;
   selectedTabIdx = idx;
   q('#presetName').textContent = el.querySelector('.tl').textContent;
-  send('SEG:'+editSeg);   // re-sync segment selection with firmware
+  send('EDITP:'+idx);    // tell firmware which preset is being edited
+  send('SEG:'+editSeg);  // re-sync segment selection
   paint();
 }
 
@@ -560,6 +564,8 @@ selectedTabEl = q('.tab.selected');
 applyPatternFields(0);   // start with Solid
 setConnState('disconnected');
 paint();
+
+// Note: EDITP/SEG sync happens on first connect via selectTab/selectSeg
 </script>
 </body>
 </html>
