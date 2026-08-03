@@ -208,9 +208,10 @@
 
 <script>
 // ── BLE UUIDs ──────────────────────────────────────────
-const SVC  = '12345678-1234-5678-1234-56789abcdef0';
-const CHAR = '12345678-1234-5678-1234-56789abcdef1';
-const RSSI = '12345678-1234-5678-1234-56789abcdef2';
+const SVC   = '12345678-1234-5678-1234-56789abcdef0';
+const CHAR  = '12345678-1234-5678-1234-56789abcdef1';
+const RSSI  = '12345678-1234-5678-1234-56789abcdef2';
+const STATE = '12345678-1234-5678-1234-56789abcdef3';
 
 // ── STATE ──────────────────────────────────────────────
 let characteristic = null;
@@ -265,6 +266,13 @@ async function toggleConnect() {
       await rc.startNotifications();
       rc.addEventListener('characteristicvaluechanged', onRssi);
     } catch(e) { console.log('RSSI not available'); }
+    // Read current state from ESP32 and sync UI
+    try {
+      const sc = await service.getCharacteristic(STATE);
+      const val = await sc.readValue();
+      const stateStr = new TextDecoder().decode(val);
+      applyState(stateStr);
+    } catch(e) { console.log('State sync not available:', e); }
     setConnState('connected');
   } catch(e) {
     const msg = e.message || String(e);
@@ -382,6 +390,76 @@ function onSpd(val) {
 function onSlide(cmd, labelId, val) {
   q('#'+labelId).textContent = val;
   qSend(cmd, val);
+}
+
+// ── STATE SYNC (called once on connect) ────────────────
+// Parses "QA:N,ON:0/1,COLOR:RRGGBB,BRIGHT:pct,..." from ESP32
+// and updates the entire UI to match what's actually running.
+function applyState(stateStr) {
+  // parse "KEY:VAL,KEY:VAL,..." into an object
+  const s = {};
+  stateStr.split(',').forEach(pair => {
+    const [k, v] = pair.split(':');
+    if (k && v !== undefined) s[k.trim()] = v.trim();
+  });
+
+  // lights on/off
+  if (s.ON !== undefined) {
+    lightsOn = s.ON === '1';
+    const t = q('#toggle');
+    if (lightsOn) t.classList.remove('off');
+    else          t.classList.add('off');
+  }
+
+  // color
+  if (s.COLOR) {
+    uniColor = '#' + s.COLOR.toLowerCase();
+    q('#qaColor').value = uniColor;
+  }
+
+  // select the running QA button (without sending QA command back)
+  if (s.QA !== undefined) {
+    const idx = parseInt(s.QA);
+    const btns = qa('.qbtn');
+    if (idx >= 0 && idx < btns.length) {
+      activeQA   = idx;
+      activeQAEl = btns[idx];
+
+      // show tuning panel and correct fields
+      q('#tuningCard').classList.remove('disabled');
+      q('#tuningWho').textContent = ['Solid','Breathe','Waves'][idx];
+      qa('.field[data-qa]').forEach(f => {
+        const targets = f.dataset.qa.split(',').map(Number);
+        f.classList.toggle('hidden', !targets.includes(idx));
+      });
+      q('#patDivider').style.display = '';
+
+      // apply synced values to sliders
+      const br   = parseInt(s.BRIGHT) || 0;
+      const base = parseInt(s.BASE)   || 0;
+      const minb = parseInt(s.MINBR)  || 0;
+      const maxb = parseInt(s.MAXBR)  || 0;
+      const spd  = parseInt(s.SPD)    || 0;
+      const trail= parseInt(s.TRAIL)  || 6;
+      const wb   = parseInt(s.WBRIGHT)|| 100;
+
+      // Solid
+      q('#fSolidBr input').value = br;   q('#vSolidBr').textContent = br + '%';
+      // Breathe
+      q('#fMinBr input').value = minb;   q('#vMinBr').textContent = minb + '%';
+      q('#fMaxBr input').value = maxb;   q('#vMaxBr').textContent = maxb + '%';
+      // Waves
+      q('#fWaveMaster input').value = wb; q('#vWaveMaster').textContent = wb + '%';
+      q('#fWaveBr input').value = br;    q('#vWaveBr').textContent = br + '%';
+      q('#fBase input').value = base;    q('#vBase').textContent = base + '%';
+      q('#fTrail input').value = trail;  q('#vTrail').textContent = trail;
+      // Shared (Breathe + Waves)
+      q('#fSpd input').value = spd;
+      q('#vSpd').textContent = spd === 0 ? '0%' : (spd > 0 ? '+' : '') + (spd * 10) + '%';
+    }
+  }
+
+  paint();
 }
 
 // ── INIT ───────────────────────────────────────────────
