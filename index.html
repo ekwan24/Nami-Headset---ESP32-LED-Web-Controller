@@ -223,13 +223,6 @@ let lightsOn       = true;
 let activeQA       = -1;     // which QA is selected (-1 = none)
 let activeQAEl     = null;   // the button element
 
-// connection-loss detection
-let heartbeatTimer   = null;   // periodically confirms the link is actually alive
-let heartbeatFails   = 0;      // consecutive failed heartbeat/write attempts
-let stateCharRef     = null;   // kept so the heartbeat can read it directly
-const HEARTBEAT_INTERVAL_MS = 6000;
-const HEARTBEAT_FAIL_LIMIT  = 2;   // require 2 misses in a row before declaring the link dead
-
 // universal values (persist across QA switches)
 let uniColor  = '#80e2e5';
 
@@ -247,14 +240,8 @@ function qa(s) { return document.querySelectorAll(s); }
 // ── BLE SEND ───────────────────────────────────────────
 async function send(str) {
   if (!characteristic) return;
-  try {
-    await characteristic.writeValue(new TextEncoder().encode(str));
-    heartbeatFails = 0;   // any successful write proves the link is alive
-  }
-  catch(e) {
-    console.error('Send failed:', e);
-    registerHeartbeatFailure();
-  }
+  try { await characteristic.writeValue(new TextEncoder().encode(str)); }
+  catch(e) { console.error('Send failed:', e); }
 }
 
 let pending={}, debTimer=null;
@@ -269,9 +256,6 @@ async function toggleConnect() {
   try {
     showErr('');
     setConnState('connecting');
-    stopHeartbeat();
-    heartbeatFails = 0;
-    stateCharRef = null;
     device = await navigator.bluetooth.requestDevice({
       filters:[{services:[SVC]},{name:'ESP32-LED'},{namePrefix:'ESP32'}],
       optionalServices:[SVC]
@@ -285,18 +269,16 @@ async function toggleConnect() {
       await rc.startNotifications();
       rc.addEventListener('characteristicvaluechanged', onRssi);
     } catch(e) { console.log('RSSI not available'); }
-    // Read current state from ESP32 and sync UI
-    stateCharRef = null;
+    // Read current state from ESP32 and sync UI. This is what makes the
+    // Lights toggle and pattern buttons match reality on connect, so it's
+    // worth one retry rather than silently leaving the UI on its default
+    // (On / no pattern) if the first read hits a transient BLE hiccup.
     try {
-      const sc = await service.getCharacteristic(STATE);
-      stateCharRef = sc;
-      const val = await sc.readValue();
-      const stateStr = new TextDecoder().decode(val);
+      const stateStr = await readStateWithRetry(service);
+      console.log('Synced state from device:', stateStr);
       applyState(stateStr);
-    } catch(e) { console.log('State sync not available:', e); }
+    } catch(e) { console.log('State sync failed after retry:', e); }
     setConnState('connected');
-    heartbeatFails = 0;
-    startHeartbeat();
   } catch(e) {
     const msg = e.message || String(e);
     if      (msg.includes('cancel'))  showErr('');
@@ -307,56 +289,25 @@ async function toggleConnect() {
   }
 }
 
+// Reads the STATE characteristic, retrying once after a short delay if the
+// first attempt fails (e.g. the peripheral wasn't quite ready yet right
+// after connecting). Throws if both attempts fail.
+async function readStateWithRetry(service) {
+  const sc = await service.getCharacteristic(STATE);
+  try {
+    const val = await sc.readValue();
+    return new TextDecoder().decode(val);
+  } catch(e) {
+    console.log('First state read failed, retrying:', e);
+    await new Promise(r => setTimeout(r, 300));
+    const val = await sc.readValue();
+    return new TextDecoder().decode(val);
+  }
+}
+
 function onDisconnect() {
   characteristic = null;
-  stateCharRef = null;
-  stopHeartbeat();
   setConnState('disconnected');
-}
-
-// Called whenever we suspect the link is actually dead (repeated write or
-// heartbeat failures) even though the browser hasn't fired
-// gattserverdisconnected yet. Forcing a local disconnect makes the UI
-// reflect reality and lets the normal onDisconnect cleanup run.
-function handleConnectionLost() {
-  if (!device) return;
-  stopHeartbeat();
-  if (device.gatt && device.gatt.connected) {
-    try { device.gatt.disconnect(); } catch(e) { /* ignore */ }
-  }
-  // gattserverdisconnected may not fire if the OS already lost the link
-  // silently, so update the UI directly as a fallback too.
-  characteristic = null;
-  setConnState('disconnected');
-}
-
-// Shared by write failures and heartbeat misses. A single hiccup (a busy
-// radio, a slow response) shouldn't disconnect the app — only a run of
-// consecutive failures, or a GATT layer that's already confirmed dead.
-function registerHeartbeatFailure() {
-  heartbeatFails++;
-  const gattConfirmedDead = device && device.gatt && device.gatt.connected === false;
-  if (gattConfirmedDead || heartbeatFails >= HEARTBEAT_FAIL_LIMIT) {
-    console.log('Connection appears lost after', heartbeatFails, 'failed check(s)');
-    handleConnectionLost();
-  }
-}
-
-function startHeartbeat() {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(async () => {
-    if (!stateCharRef) return;   // no way to actively ping — rely on native disconnect event only
-    try {
-      await stateCharRef.readValue();
-      heartbeatFails = 0;
-    } catch(e) {
-      registerHeartbeatFailure();
-    }
-  }, HEARTBEAT_INTERVAL_MS);
-}
-
-function stopHeartbeat() {
-  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
 }
 
 function setConnState(s) {
