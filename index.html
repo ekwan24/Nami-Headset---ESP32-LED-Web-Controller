@@ -222,11 +222,17 @@ let device         = null;
 let lightsOn       = true;
 let activeQA       = -1;     // which QA is selected (-1 = none)
 let activeQAEl     = null;   // the button element
+let stateCharacteristic = null;   // kept live so we can re-sync sliders after switching patterns
 
 // universal values (persist across QA switches)
 let uniColor  = '#80e2e5';
 
 // per-QA pattern-specific defaults (shown when switching to that QA)
+// Fallback only — used to populate the tuning panel if a live read from the
+// device fails right after switching patterns. The real values always come
+// from the firmware (see the DEFAULT TUNING VALUES block in the .ino) via
+// syncStateFromDevice(); these numbers are not guaranteed to match the
+// firmware's current #define values and should not be relied on.
 const QA_DEFAULTS = {
   0: { solidbr:30 },                          // Solid: brightness
   1: { minbr:10, maxbr:30, spd:0 },           // Breathe
@@ -274,10 +280,9 @@ async function toggleConnect() {
     // worth one retry rather than silently leaving the UI on its default
     // (On / no pattern) if the first read hits a transient BLE hiccup.
     try {
-      const stateStr = await readStateWithRetry(service);
-      console.log('Synced state from device:', stateStr);
-      applyState(stateStr);
-    } catch(e) { console.log('State sync failed after retry:', e); }
+      stateCharacteristic = await service.getCharacteristic(STATE);
+      await syncStateFromDevice();
+    } catch(e) { console.log('State sync failed:', e); }
     setConnState('connected');
   } catch(e) {
     const msg = e.message || String(e);
@@ -289,24 +294,31 @@ async function toggleConnect() {
   }
 }
 
-// Reads the STATE characteristic, retrying once after a short delay if the
-// first attempt fails (e.g. the peripheral wasn't quite ready yet right
-// after connecting). Throws if both attempts fail.
-async function readStateWithRetry(service) {
-  const sc = await service.getCharacteristic(STATE);
+// Reads the STATE characteristic and applies it to the UI, retrying once
+// after a short delay if the first attempt fails (e.g. the peripheral
+// wasn't quite ready yet). This is the single source of truth for slider
+// values — it always reflects whatever the firmware is actually running,
+// including the #define defaults baked in at boot, so the sliders never
+// drift out of sync with the .ino.
+async function syncStateFromDevice() {
+  if (!stateCharacteristic) return;
+  let stateStr;
   try {
-    const val = await sc.readValue();
-    return new TextDecoder().decode(val);
+    const val = await stateCharacteristic.readValue();
+    stateStr = new TextDecoder().decode(val);
   } catch(e) {
     console.log('First state read failed, retrying:', e);
     await new Promise(r => setTimeout(r, 300));
-    const val = await sc.readValue();
-    return new TextDecoder().decode(val);
+    const val = await stateCharacteristic.readValue();
+    stateStr = new TextDecoder().decode(val);
   }
+  console.log('Synced state from device:', stateStr);
+  applyState(stateStr);
 }
 
 function onDisconnect() {
   characteristic = null;
+  stateCharacteristic = null;
   setConnState('disconnected');
 }
 
@@ -353,12 +365,12 @@ function toggleLights() {
 }
 
 // ── QUICK ACCESS SELECTION ─────────────────────────────
-function selectQA(idx, btn) {
+async function selectQA(idx, btn) {
   activeQA   = idx;
   activeQAEl = btn;
 
   // run this QA effect on firmware
-  send('QA:'+idx);
+  await send('QA:'+idx);
 
   // re-apply universal color immediately
   send('QACOLOR:'+uniColor.replace('#',''));
@@ -376,18 +388,23 @@ function selectQA(idx, btn) {
   // show divider — all three patterns now have at least one specific control
   q('#patDivider').style.display = '';
 
-  // load pattern-specific defaults into the controls for this QA
-  const def = QA_DEFAULTS[idx] || {};
-  if (def.wavemaster !== undefined){ q('#fWaveMaster input').value=def.wavemaster; q('#vWaveMaster').textContent=def.wavemaster+'%'; }
-  if (def.solidbr !== undefined){ q('#fSolidBr input').value=def.solidbr; q('#vSolidBr').textContent=def.solidbr+'%'; }
-  if (def.minbr   !== undefined){ q('#fMinBr input').value=def.minbr;    q('#vMinBr').textContent=def.minbr+'%'; }
-  if (def.maxbr   !== undefined){ q('#fMaxBr input').value=def.maxbr;    q('#vMaxBr').textContent=def.maxbr+'%'; }
-  if (def.wavebr  !== undefined){ q('#fWaveBr input').value=def.wavebr;  q('#vWaveBr').textContent=def.wavebr+'%'; }
-  if (def.spd     !== undefined){ q('#fSpd input').value=def.spd;        q('#vSpd').textContent='0%'; }
-  if (def.base    !== undefined){ q('#fBase input').value=def.base;      q('#vBase').textContent=def.base+'%'; }
-  if (def.trail   !== undefined){ q('#fTrail input').value=def.trail;    q('#vTrail').textContent=def.trail; }
-
-  paint();
+  // pull this pattern's actual current values (the .ino's #define defaults,
+  // or whatever was tuned earlier this session) straight from the device
+  try {
+    await syncStateFromDevice();
+  } catch(e) {
+    console.log('Could not sync from device, falling back to placeholder defaults:', e);
+    const def = QA_DEFAULTS[idx] || {};
+    if (def.wavemaster !== undefined){ q('#fWaveMaster input').value=def.wavemaster; q('#vWaveMaster').textContent=def.wavemaster+'%'; }
+    if (def.solidbr !== undefined){ q('#fSolidBr input').value=def.solidbr; q('#vSolidBr').textContent=def.solidbr+'%'; }
+    if (def.minbr   !== undefined){ q('#fMinBr input').value=def.minbr;    q('#vMinBr').textContent=def.minbr+'%'; }
+    if (def.maxbr   !== undefined){ q('#fMaxBr input').value=def.maxbr;    q('#vMaxBr').textContent=def.maxbr+'%'; }
+    if (def.wavebr  !== undefined){ q('#fWaveBr input').value=def.wavebr;  q('#vWaveBr').textContent=def.wavebr+'%'; }
+    if (def.spd     !== undefined){ q('#fSpd input').value=def.spd;        q('#vSpd').textContent='0%'; }
+    if (def.base    !== undefined){ q('#fBase input').value=def.base;      q('#vBase').textContent=def.base+'%'; }
+    if (def.trail   !== undefined){ q('#fTrail input').value=def.trail;    q('#vTrail').textContent=def.trail; }
+    paint();
+  }
 }
 
 // ── PAINT ──────────────────────────────────────────────
