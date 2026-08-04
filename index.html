@@ -73,7 +73,14 @@
   /* Card 3: Tuning */
   .tuning-card { transition:opacity .2s; }
   .tuning-card.disabled { opacity:.35; pointer-events:none; }
-  .tuning-who { font-size:16px; color:var(--text); font-weight:700; margin:0 0 14px; }
+  .tuning-header { display:flex; align-items:center; justify-content:space-between; margin:0 0 14px; gap:10px; }
+  .tuning-who { font-size:16px; color:var(--text); font-weight:700; margin:0; }
+  .reset-btn { flex:none; width:32px; height:32px; padding:0; border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--card2); border:1px solid var(--border); color:var(--muted); }
+  .reset-btn svg { display:block; transition:transform .5s ease; }
+  .reset-btn.spin svg { transform:rotate(-360deg); }
+  .reset-btn.flash { color:var(--accent); border-color:var(--accent); background:rgba(128,226,229,.12); }
   .divider { height:1px; background:var(--border); margin:14px 0; }
   .field { margin-bottom:14px; }
   .field:last-child { margin-bottom:0; }
@@ -134,7 +141,15 @@
 <div class="card tuning-card disabled" id="tuningCard">
 
   <!-- Universal: always shown, persists across Default switches -->
-  <div class="tuning-who" id="tuningWho">Select a pattern to begin</div>
+  <div class="tuning-header">
+    <div class="tuning-who" id="tuningWho">Select a pattern to begin</div>
+    <button class="reset-btn" id="resetBtn" onclick="resetPattern()" title="Reset to default" aria-label="Reset to default">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 3-6.7"/>
+        <polyline points="3 3 3 8 8 8"/>
+      </svg>
+    </button>
+  </div>
 
   <div class="field" id="fColor">
     <label>Color</label>
@@ -405,6 +420,25 @@ async function selectQA(idx, btn) {
     if (def.trail   !== undefined){ q('#fTrail input').value=def.trail;    q('#vTrail').textContent=def.trail; }
     paint();
   }
+}
+
+// ── RESET TO DEFAULT ────────────────────────────────────
+async function resetPattern() {
+  if (activeQA < 0) return;  // no pattern selected yet, nothing to reset
+
+  await send('RESET');
+
+  // button effect: spin the icon + flash accent color, then settle back
+  const btn = q('#resetBtn');
+  btn.classList.remove('spin');
+  void btn.offsetWidth;  // restart animation if pressed again quickly
+  btn.classList.add('spin', 'flash');
+  setTimeout(() => btn.classList.remove('spin', 'flash'), 500);
+
+  // firmware has now restored this pattern's defaults — pull the real
+  // values back so every slider (and the color swatch) reflects them
+  try { await syncStateFromDevice(); }
+  catch(e) { console.log('Reset sync failed:', e); }
 }
 
 // ── PAINT ──────────────────────────────────────────────
