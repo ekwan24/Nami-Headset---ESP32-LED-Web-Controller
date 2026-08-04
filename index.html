@@ -224,11 +224,11 @@ let activeQA       = -1;     // which QA is selected (-1 = none)
 let activeQAEl     = null;   // the button element
 
 // connection-loss detection
-let rssiAvailable  = false;  // did the RSSI characteristic subscribe successfully?
-let lastRssiMs     = 0;      // timestamp of last RSSI notification received
-let heartbeatTimer = null;   // watches for stale RSSI (ESP32 gone dark/powered off)
-const HEARTBEAT_INTERVAL_MS = 2000;
-const HEARTBEAT_TIMEOUT_MS  = 5000;
+let heartbeatTimer   = null;   // periodically confirms the link is actually alive
+let heartbeatFails   = 0;      // consecutive failed heartbeat/write attempts
+let stateCharRef     = null;   // kept so the heartbeat can read it directly
+const HEARTBEAT_INTERVAL_MS = 6000;
+const HEARTBEAT_FAIL_LIMIT  = 2;   // require 2 misses in a row before declaring the link dead
 
 // universal values (persist across QA switches)
 let uniColor  = '#80e2e5';
@@ -247,13 +247,13 @@ function qa(s) { return document.querySelectorAll(s); }
 // ── BLE SEND ───────────────────────────────────────────
 async function send(str) {
   if (!characteristic) return;
-  try { await characteristic.writeValue(new TextEncoder().encode(str)); }
+  try {
+    await characteristic.writeValue(new TextEncoder().encode(str));
+    heartbeatFails = 0;   // any successful write proves the link is alive
+  }
   catch(e) {
     console.error('Send failed:', e);
-    // a write failure almost always means the link is actually gone
-    // (ESP32 powered off / walked out of range) even if the OS hasn't
-    // fired gattserverdisconnected yet — treat it as a disconnect.
-    handleConnectionLost();
+    registerHeartbeatFailure();
   }
 }
 
@@ -269,8 +269,9 @@ async function toggleConnect() {
   try {
     showErr('');
     setConnState('connecting');
-    rssiAvailable = false;
     stopHeartbeat();
+    heartbeatFails = 0;
+    stateCharRef = null;
     device = await navigator.bluetooth.requestDevice({
       filters:[{services:[SVC]},{name:'ESP32-LED'},{namePrefix:'ESP32'}],
       optionalServices:[SVC]
@@ -283,17 +284,18 @@ async function toggleConnect() {
       const rc = await service.getCharacteristic(RSSI);
       await rc.startNotifications();
       rc.addEventListener('characteristicvaluechanged', onRssi);
-      rssiAvailable = true;
-      lastRssiMs = Date.now();
-    } catch(e) { console.log('RSSI not available'); rssiAvailable = false; }
+    } catch(e) { console.log('RSSI not available'); }
     // Read current state from ESP32 and sync UI
+    stateCharRef = null;
     try {
       const sc = await service.getCharacteristic(STATE);
+      stateCharRef = sc;
       const val = await sc.readValue();
       const stateStr = new TextDecoder().decode(val);
       applyState(stateStr);
     } catch(e) { console.log('State sync not available:', e); }
     setConnState('connected');
+    heartbeatFails = 0;
     startHeartbeat();
   } catch(e) {
     const msg = e.message || String(e);
@@ -307,14 +309,15 @@ async function toggleConnect() {
 
 function onDisconnect() {
   characteristic = null;
+  stateCharRef = null;
   stopHeartbeat();
   setConnState('disconnected');
 }
 
-// Called whenever we suspect the link is actually dead (write failure or
-// stale RSSI) even though the browser hasn't fired gattserverdisconnected
-// yet. Forcing a local disconnect makes the UI reflect reality immediately
-// and lets the normal onDisconnect cleanup run.
+// Called whenever we suspect the link is actually dead (repeated write or
+// heartbeat failures) even though the browser hasn't fired
+// gattserverdisconnected yet. Forcing a local disconnect makes the UI
+// reflect reality and lets the normal onDisconnect cleanup run.
 function handleConnectionLost() {
   if (!device) return;
   stopHeartbeat();
@@ -327,13 +330,27 @@ function handleConnectionLost() {
   setConnState('disconnected');
 }
 
+// Shared by write failures and heartbeat misses. A single hiccup (a busy
+// radio, a slow response) shouldn't disconnect the app — only a run of
+// consecutive failures, or a GATT layer that's already confirmed dead.
+function registerHeartbeatFailure() {
+  heartbeatFails++;
+  const gattConfirmedDead = device && device.gatt && device.gatt.connected === false;
+  if (gattConfirmedDead || heartbeatFails >= HEARTBEAT_FAIL_LIMIT) {
+    console.log('Connection appears lost after', heartbeatFails, 'failed check(s)');
+    handleConnectionLost();
+  }
+}
+
 function startHeartbeat() {
   stopHeartbeat();
-  if (!rssiAvailable) return;   // nothing to watch, rely on native disconnect event only
-  heartbeatTimer = setInterval(() => {
-    if (Date.now() - lastRssiMs > HEARTBEAT_TIMEOUT_MS) {
-      console.log('Heartbeat timeout — no RSSI updates, assuming connection lost');
-      handleConnectionLost();
+  heartbeatTimer = setInterval(async () => {
+    if (!stateCharRef) return;   // no way to actively ping — rely on native disconnect event only
+    try {
+      await stateCharRef.readValue();
+      heartbeatFails = 0;
+    } catch(e) {
+      registerHeartbeatFailure();
     }
   }, HEARTBEAT_INTERVAL_MS);
 }
@@ -369,7 +386,6 @@ function setConnState(s) {
 function showErr(msg) { q('#errMsg').textContent=msg; }
 
 function onRssi(ev) {
-  lastRssiMs = Date.now();
   const rssi=parseInt(new TextDecoder().decode(ev.target.value).trim());
   if (isNaN(rssi)) return;
   const b = rssi>=-55?4:rssi>=-67?3:rssi>=-78?2:rssi>=-88?1:0;
