@@ -133,6 +133,7 @@
       <button class="qbtn" onclick="selectQA(0,this)"><span class="ql">Solid</span></button>
       <button class="qbtn" onclick="selectQA(1,this)"><span class="ql">Breathe</span></button>
       <button class="qbtn" onclick="selectQA(2,this)"><span class="ql">Waves</span></button>
+      <button class="qbtn" onclick="selectQA(3,this)"><span class="ql">Rainbow</span></button>
     </div>
   </div>
 </div>
@@ -151,7 +152,7 @@
     </button>
   </div>
 
-  <div class="field" id="fColor">
+  <div class="field" id="fColor" data-qa="0,1,2">
     <label>Color</label>
     <input type="color" id="qaColor" value="#80e2e5" oninput="onQAColor(this.value)">
   </div>
@@ -160,7 +161,7 @@
   <div class="divider" id="patDivider" style="display:none"></div>
 
   <!-- Solid (0) specific: Brightness -->
-  <div class="field hidden" data-qa="0" id="fSolidBr">
+  <div class="field hidden" data-qa="0,3" id="fSolidBr">
     <label>Brightness <span class="val" id="vSolidBr">30%</span></label>
     <input type="range" min="0" max="100" value="30"
            oninput="onPct('BRIGHT','vSolidBr',this.value)"
@@ -198,11 +199,18 @@
            onchange="sendNow('BRIGHT',this.value)">
   </div>
 
-  <!-- Default 2 + 3 (Breathe + Waves) -->
-  <div class="field hidden" data-qa="1,2" id="fSpd">
+  <!-- Default 2 + 3 + 4 (Breathe + Waves + Rainbow) -->
+  <div class="field hidden" data-qa="1,2,3" id="fSpd">
     <label>Speed <span class="val" id="vSpd">0%</span></label>
     <input type="range" min="-5" max="5" value="0" step="1"
            oninput="onSpd(this.value)" onchange="sendNow('SPD',this.value)">
+  </div>
+
+  <!-- Default 4 (Rainbow) specific: independent hue-cycling speed -->
+  <div class="field hidden" data-qa="3" id="fRainbowSpd">
+    <label>Rainbow Speed <span class="val" id="vRainbowSpd">0%</span></label>
+    <input type="range" min="-5" max="5" value="0" step="1"
+           oninput="onRainbowSpd(this.value)" onchange="sendNow('HUESPD',this.value)">
   </div>
 
   <!-- Default 3 (Waves): Base Brightness (renamed from Base Glow) -->
@@ -251,7 +259,8 @@ let uniColor  = '#80e2e5';
 const QA_DEFAULTS = {
   0: { solidbr:30 },                          // Solid: brightness
   1: { minbr:10, maxbr:30, spd:0 },           // Breathe
-  2: { wavemaster:100, wavebr:25, base:15, spd:0, trail:20 }  // Waves
+  2: { wavemaster:100, wavebr:25, base:15, spd:0, trail:20 }, // Waves
+  3: { solidbr:25, spd:0, rainbowspd:0 }                      // Rainbow
 };
 
 // ── HELPERS ────────────────────────────────────────────
@@ -392,7 +401,7 @@ async function selectQA(idx, btn) {
 
   // show the tuning panel
   q('#tuningCard').classList.remove('disabled');
-  q('#tuningWho').textContent = ['Solid','Breathe','Waves'][idx];
+  q('#tuningWho').textContent = ['Solid','Breathe','Waves','Rainbow'][idx];
 
   // show/hide pattern-specific fields
   qa('.field[data-qa]').forEach(f=>{
@@ -418,6 +427,7 @@ async function selectQA(idx, btn) {
     if (def.spd     !== undefined){ q('#fSpd input').value=def.spd;        q('#vSpd').textContent='0%'; }
     if (def.base    !== undefined){ q('#fBase input').value=def.base;      q('#vBase').textContent=def.base+'%'; }
     if (def.trail   !== undefined){ q('#fTrail input').value=def.trail;    q('#vTrail').textContent=def.trail; }
+    if (def.rainbowspd !== undefined){ q('#fRainbowSpd input').value=def.rainbowspd; q('#vRainbowSpd').textContent='0%'; }
     paint();
   }
 }
@@ -468,6 +478,12 @@ function onSpd(val) {
   qSend('SPD', val);
 }
 
+function onRainbowSpd(val) {
+  const v = parseInt(val);
+  q('#vRainbowSpd').textContent = v===0 ? '0%' : (v>0?'+':'')+(v*10)+'%';
+  qSend('HUESPD', val);
+}
+
 function onSlide(cmd, labelId, val) {
   q('#'+labelId).textContent = val;
   qSend(cmd, val);
@@ -508,7 +524,7 @@ function applyState(stateStr) {
 
       // show tuning panel and correct fields
       q('#tuningCard').classList.remove('disabled');
-      q('#tuningWho').textContent = ['Solid','Breathe','Waves'][idx];
+      q('#tuningWho').textContent = ['Solid','Breathe','Waves','Rainbow'][idx];
       qa('.field[data-qa]').forEach(f => {
         const targets = f.dataset.qa.split(',').map(Number);
         f.classList.toggle('hidden', !targets.includes(idx));
@@ -523,6 +539,7 @@ function applyState(stateStr) {
       const spd  = parseInt(s.SPD)    || 0;
       const trail= parseInt(s.TRAIL)  || 6;
       const wb   = parseInt(s.WBRIGHT)|| 100;
+      const rspd = parseInt(s.RSPD)   || 0;
 
       // Solid
       q('#fSolidBr input').value = br;   q('#vSolidBr').textContent = br + '%';
@@ -534,9 +551,12 @@ function applyState(stateStr) {
       q('#fWaveBr input').value = br;    q('#vWaveBr').textContent = br + '%';
       q('#fBase input').value = base;    q('#vBase').textContent = base + '%';
       q('#fTrail input').value = trail;  q('#vTrail').textContent = trail;
-      // Shared (Breathe + Waves)
+      // Shared (Breathe + Waves + Rainbow)
       q('#fSpd input').value = spd;
       q('#vSpd').textContent = spd === 0 ? '0%' : (spd > 0 ? '+' : '') + (spd * 10) + '%';
+      // Rainbow-only
+      q('#fRainbowSpd input').value = rspd;
+      q('#vRainbowSpd').textContent = rspd === 0 ? '0%' : (rspd > 0 ? '+' : '') + (rspd * 10) + '%';
     }
   }
 
