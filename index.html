@@ -247,6 +247,8 @@ let activeQA       = -1;     // which QA is selected (-1 = none)
 let activeQAEl     = null;   // the button element
 let stateCharacteristic = null;   // kept live so we can re-sync sliders after switching patterns
 let manualDisconnect = false;     // true only when the user tapped Disconnect themselves — suppresses auto-reconnect
+let isReconnecting   = false;     // true while attemptReconnect() is actively retrying
+let reconnectAbort   = false;     // set true to stop an in-progress reconnect loop early
 
 // universal values (persist across QA switches)
 let uniColor  = '#80e2e5';
@@ -282,6 +284,14 @@ function sendNow(cmd,val){ pending[cmd]=val; flush(); }
 
 // ── CONNECTION ─────────────────────────────────────────
 async function toggleConnect() {
+  if (isReconnecting) {
+    // user wants to stop the auto-reconnect retries and go fully disconnected
+    reconnectAbort = true;
+    isReconnecting = false;
+    try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch(_) {}
+    setConnState('disconnected');
+    return;
+  }
   if (device && device.gatt.connected) { manualDisconnect = true; device.gatt.disconnect(); return; }
   if (!navigator.bluetooth) { showErr('Web Bluetooth not supported — use Chrome'); return; }
   try {
@@ -368,11 +378,21 @@ function onDisconnect() {
   attemptReconnect();
 }
 
-async function attemptReconnect(retries = 5, delayMs = 2000) {
-  setConnState('connecting');
+async function attemptReconnect(retries = 5, delayMs = 1000, connectTimeoutMs = 4000) {
+  isReconnecting = true;
+  reconnectAbort = false;
+  setConnState('reconnecting');
   for (let i = 0; i < retries; i++) {
+    if (reconnectAbort) { isReconnecting = false; return; }  // user hit Cancel — state already set by toggleConnect
     try {
-      const server  = await device.gatt.connect();
+      // gatt.connect() has no built-in short timeout — if the device is
+      // truly off/unreachable it can hang far longer than we want, so race
+      // it against our own clock and treat a timeout as a failed attempt.
+      const server = await Promise.race([
+        device.gatt.connect(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('connect timeout')), connectTimeoutMs))
+      ]);
+      if (reconnectAbort) { isReconnecting = false; return; }
       const service = await server.getPrimaryService(SVC);
       characteristic = await service.getCharacteristic(CHAR);
       try {
@@ -382,15 +402,19 @@ async function attemptReconnect(retries = 5, delayMs = 2000) {
       } catch(e) { console.log('RSSI not available'); }
       stateCharacteristic = await service.getCharacteristic(STATE);
       await syncStateFromDevice();
+      isReconnecting = false;
       setConnState('connected');
       startPing();
       return;
     } catch(e) {
       console.log('Reconnect attempt ' + (i + 1) + ' failed:', e);
+      try { device.gatt.disconnect(); } catch(_) {}  // clear any half-open attempt before retrying
+      if (reconnectAbort) { isReconnecting = false; return; }
       await new Promise(r => setTimeout(r, delayMs));
     }
   }
   // gave up after all retries — device is likely actually off or too far away
+  isReconnecting = false;
   setConnState('disconnected');
 }
 
@@ -406,7 +430,7 @@ function startPing() {
     try {
       await Promise.race([
         stateCharacteristic.readValue(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 2000))
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 1500))
       ]);
     } catch(e) {
       console.log('Ping failed, connection likely lost:', e);
@@ -417,7 +441,7 @@ function startPing() {
         onDisconnect();
       }
     }
-  }, 4000);
+  }, 3000);
 }
 function stopPing() {
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
@@ -434,6 +458,9 @@ function setConnState(s) {
     q('#row24').classList.add('disconnected-dim');
     q('#tuningCard').classList.add('disconnected-dim');
     qa('.qbtn').forEach(b=>b.classList.remove('live'));
+  } else if (s==='reconnecting') {
+    dot.classList.add('connecting'); txt.textContent='Reconnecting…';
+    btn.textContent='Cancel'; btn.disabled=false;
   } else if (s==='connecting') {
     dot.classList.add('connecting'); txt.textContent='Connecting…';
     btn.textContent='Connecting…'; btn.disabled=true;
