@@ -368,7 +368,17 @@ function onDisconnect() {
 
   if (manualDisconnect || !device) {
     manualDisconnect = false;
+    isReconnecting = false;
+    reconnectAbort = false;
     setConnState('disconnected');
+    return;
+  }
+
+  if (isReconnecting) {
+    // already inside a reconnect loop — a mid-attempt failure just
+    // triggered its own disconnect event. Let the existing loop keep
+    // retrying instead of starting a second, overlapping one (this was
+    // the cause of the connect/disconnect/reconnect flapping).
     return;
   }
 
@@ -423,17 +433,25 @@ async function attemptReconnect(retries = 5, delayMs = 1000, connectTimeoutMs = 
 // browser's gattserverdisconnected event quickly, so this catches those
 // faster by forcing a real disconnect, which then triggers reconnect above.
 let pingTimer = null;
+let pingFailCount = 0;
+const PING_FAIL_THRESHOLD = 2;  // require 2 consecutive misses before treating it as a real disconnect
 function startPing() {
   stopPing();
+  pingFailCount = 0;
   pingTimer = setInterval(async () => {
     if (!stateCharacteristic) return;
+    if (Object.keys(pending).length > 0 || debTimer) return;  // a slider write is in flight — don't compete with it
     try {
       await Promise.race([
         stateCharacteristic.readValue(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 1500))
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 2500))
       ]);
+      pingFailCount = 0;  // healthy read — reset the miss counter
     } catch(e) {
-      console.log('Ping failed, connection likely lost:', e);
+      pingFailCount++;
+      console.log('Ping miss ' + pingFailCount + '/' + PING_FAIL_THRESHOLD + ':', e);
+      if (pingFailCount < PING_FAIL_THRESHOLD) return;  // could just be a slow response, not a real drop yet
+      console.log('Connection likely lost, forcing disconnect');
       stopPing();
       if (device && device.gatt.connected) {
         try { device.gatt.disconnect(); } catch(_) {}  // triggers onDisconnect naturally
@@ -441,7 +459,7 @@ function startPing() {
         onDisconnect();
       }
     }
-  }, 3000);
+  }, 5000);
 }
 function stopPing() {
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
