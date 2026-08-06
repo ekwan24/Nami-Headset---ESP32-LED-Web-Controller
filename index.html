@@ -246,6 +246,7 @@ let lightsOn       = true;
 let activeQA       = -1;     // which QA is selected (-1 = none)
 let activeQAEl     = null;   // the button element
 let stateCharacteristic = null;   // kept live so we can re-sync sliders after switching patterns
+let manualDisconnect = false;     // true only when the user tapped Disconnect themselves — suppresses auto-reconnect
 
 // universal values (persist across QA switches)
 let uniColor  = '#80e2e5';
@@ -281,7 +282,7 @@ function sendNow(cmd,val){ pending[cmd]=val; flush(); }
 
 // ── CONNECTION ─────────────────────────────────────────
 async function toggleConnect() {
-  if (device && device.gatt.connected) { device.gatt.disconnect(); return; }
+  if (device && device.gatt.connected) { manualDisconnect = true; device.gatt.disconnect(); return; }
   if (!navigator.bluetooth) { showErr('Web Bluetooth not supported — use Chrome'); return; }
   try {
     showErr('');
@@ -308,6 +309,8 @@ async function toggleConnect() {
       await syncStateFromDevice();
     } catch(e) { console.log('State sync failed:', e); }
     setConnState('connected');
+    manualDisconnect = false;
+    startPing();
   } catch(e) {
     const msg = e.message || String(e);
     if      (msg.includes('cancel'))  showErr('');
@@ -340,10 +343,84 @@ async function syncStateFromDevice() {
   applyState(stateStr);
 }
 
+// ── DISCONNECT HANDLING (auto-reconnect) ───────────────
+// OLD VERSION — kept for reference/rollback:
+// function onDisconnect() {
+//   characteristic = null;
+//   stateCharacteristic = null;
+//   setConnState('disconnected');
+// }
+
 function onDisconnect() {
   characteristic = null;
   stateCharacteristic = null;
+  stopPing();
+
+  if (manualDisconnect || !device) {
+    manualDisconnect = false;
+    setConnState('disconnected');
+    return;
+  }
+
+  // unexpected drop (out of range, ESP32 powered off, interference) — try
+  // to silently reconnect using the cached device reference before giving
+  // up and showing "Disconnected". No device picker, no user action needed.
+  attemptReconnect();
+}
+
+async function attemptReconnect(retries = 5, delayMs = 2000) {
+  setConnState('connecting');
+  for (let i = 0; i < retries; i++) {
+    try {
+      const server  = await device.gatt.connect();
+      const service = await server.getPrimaryService(SVC);
+      characteristic = await service.getCharacteristic(CHAR);
+      try {
+        const rc = await service.getCharacteristic(RSSI);
+        await rc.startNotifications();
+        rc.addEventListener('characteristicvaluechanged', onRssi);
+      } catch(e) { console.log('RSSI not available'); }
+      stateCharacteristic = await service.getCharacteristic(STATE);
+      await syncStateFromDevice();
+      setConnState('connected');
+      startPing();
+      return;
+    } catch(e) {
+      console.log('Reconnect attempt ' + (i + 1) + ' failed:', e);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  // gave up after all retries — device is likely actually off or too far away
   setConnState('disconnected');
+}
+
+// Periodic lightweight check: reads the STATE characteristic with a short
+// timeout. Some disconnects (e.g. the ESP32 losing power) don't fire the
+// browser's gattserverdisconnected event quickly, so this catches those
+// faster by forcing a real disconnect, which then triggers reconnect above.
+let pingTimer = null;
+function startPing() {
+  stopPing();
+  pingTimer = setInterval(async () => {
+    if (!stateCharacteristic) return;
+    try {
+      await Promise.race([
+        stateCharacteristic.readValue(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 2000))
+      ]);
+    } catch(e) {
+      console.log('Ping failed, connection likely lost:', e);
+      stopPing();
+      if (device && device.gatt.connected) {
+        try { device.gatt.disconnect(); } catch(_) {}  // triggers onDisconnect naturally
+      } else {
+        onDisconnect();
+      }
+    }
+  }, 4000);
+}
+function stopPing() {
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
 }
 
 function setConnState(s) {
