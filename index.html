@@ -87,10 +87,46 @@
   .field.hidden { display:none; }
   label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
   .val { float:right; color:var(--accent); font-weight:600; }
-  input[type=range], input[type=color], select { width:100%; font-family:inherit; }
-  input[type=color] { height:50px; border:none; border-radius:10px;
-    background:none; padding:0; cursor:pointer; }
+  input[type=range], select { width:100%; font-family:inherit; }
   input[type=range] { height:30px; -webkit-appearance:none; background:transparent; }
+
+  /* Custom color picker: hue+sat square + hue slider + preset swatches */
+  .hs-square { position:relative; width:100%; aspect-ratio:16/9; border-radius:10px;
+    cursor:crosshair; margin-bottom:10px; touch-action:none; transition:opacity .15s;
+    background: linear-gradient(to top, #000, rgba(0,0,0,0)),
+                linear-gradient(to right, #fff, var(--pick-hue, #80e2e5)); }
+  .hs-square.locked { cursor:default; opacity:.5; }
+  .hs-cursor { position:absolute; width:16px; height:16px; border-radius:50%;
+    border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.45);
+    transform:translate(-50%,-50%); pointer-events:none; }
+  .hue-slider { -webkit-appearance:none; width:100%; height:14px; border-radius:7px;
+    margin:0 0 12px; background:linear-gradient(to right,red,#ff0,#0f0,#0ff,#00f,#f0f,red); }
+  .hue-slider::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px;
+    border-radius:50%; background:#fff; border:2px solid var(--border); margin-top:-3px; }
+  .hue-slider:disabled { opacity:.5; }
+  .swatch-row { display:flex; gap:10px; }
+  .swatch { flex:1; aspect-ratio:1; padding:0; cursor:pointer; border-radius:8px;
+    border:2px solid var(--border); background:var(--card2); position:relative; }
+  .swatch.selected { border-color:var(--accent); box-shadow:0 0 0 2px var(--card), 0 0 0 4px var(--accent); }
+  .swatch.locked::after { content:''; position:absolute; right:4px; bottom:4px;
+    width:6px; height:6px; border-radius:50%; background:var(--muted); }
+  .swatch.empty { background:
+      linear-gradient(to top right, transparent calc(50% - 1px), var(--border) calc(50% - 1px), var(--border) calc(50% + 1px), transparent calc(50% + 1px)),
+      linear-gradient(to top left, transparent calc(50% - 1px), var(--border) calc(50% - 1px), var(--border) calc(50% + 1px), transparent calc(50% + 1px)),
+      var(--card2); }
+
+  /* Color bar (collapsed) + popover (expands to reveal the picker) */
+  .color-bar { width:100%; display:flex; align-items:center; gap:10px; font-family:inherit;
+    background:var(--card2); border:1px solid var(--border); border-radius:10px;
+    padding:10px 12px; cursor:pointer; color:var(--text); }
+  .color-bar-swatch { width:28px; height:28px; border-radius:7px; flex:none; border:1px solid var(--border); }
+  .color-bar-hex { flex:1; text-align:left; font-size:13px; color:var(--muted);
+    font-family:monospace; letter-spacing:.3px; }
+  .color-chevron { flex:none; color:var(--muted); transition:transform .2s ease; }
+  .color-chevron.open { transform:rotate(180deg); }
+  .color-popover { max-height:0; overflow:hidden; transition:max-height .25s ease; padding:0 6px; margin:0 -6px; }
+  .color-popover.open { max-height:440px; margin-top:12px; padding-bottom:6px; }
+
   input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:var(--border); }
   input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px;
     border-radius:50%; background:var(--accent); margin-top:-7px; }
@@ -154,7 +190,25 @@
 
   <div class="field" id="fColor" data-qa="0,1,2">
     <label>Color</label>
-    <input type="color" id="qaColor" value="#80e2e5" oninput="onQAColor(this.value)">
+    <button type="button" class="color-bar" id="colorBar" onclick="togglePicker()">
+      <span class="color-bar-swatch" id="colorBarSwatch"></span>
+      <span class="color-bar-hex" id="colorBarHex">#80E2E5</span>
+      <svg class="color-chevron" id="colorChevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+    <div class="color-popover" id="colorPopover">
+      <div class="hs-square" id="hsSquare">
+        <div class="hs-cursor" id="hsCursor"></div>
+      </div>
+      <input type="range" class="hue-slider" id="hueSlider" min="0" max="359" value="176" step="1" oninput="onHueInput(this.value)">
+      <div class="swatch-row" id="swatchRow">
+        <button type="button" class="swatch locked" id="swatch0" onclick="selectSlot(0)" aria-label="Default teal (fixed)"></button>
+        <button type="button" class="swatch" id="swatch1" onclick="selectSlot(1)" aria-label="Color slot 2"></button>
+        <button type="button" class="swatch" id="swatch2" onclick="selectSlot(2)" aria-label="Color slot 3"></button>
+        <button type="button" class="swatch" id="swatch3" onclick="selectSlot(3)" aria-label="Color slot 4"></button>
+      </div>
+    </div>
   </div>
 
   <!-- Divider between universal and pattern-specific -->
@@ -230,7 +284,7 @@
 
 </div>
 
-<div class="stamp">Last updated: 2026-08-03 13:15 UTC</div>
+<div class="stamp">Last updated: 2026-08-06 19:35 UTC</div>
 
 <script>
 // ── BLE UUIDs ──────────────────────────────────────────
@@ -582,11 +636,143 @@ function paint() {
   }
 }
 
-// ── UNIVERSAL TUNING ───────────────────────────────────
-function onQAColor(hex) {
-  uniColor = hex;
-  qSend('QACOLOR', hex.replace('#',''));
+// ── UNIVERSAL TUNING: custom color picker ──────────────
+// 4 preset slots. Slot 0 is fixed to the firmware's default teal and can
+// never be edited — it's always one tap back to the original look. Slots
+// 1-3 start as copies of that same teal but can be repainted by dragging
+// the hue+sat square / hue slider while that slot is selected. Whichever
+// slot is selected is what's currently live on the LEDs.
+const DEFAULT_HEX = '80E2E5';
+let slotColors = [DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX];
+let slotFilled = [true, false, false, false];   // slot 0 always "filled" (it's the fixed default); 1-3 start empty
+let activeSlot  = 0;    // -1 = a synced device color didn't match any saved slot
+let curHue = 176, curSat = 0.44, curVal = 0.90;   // HSV backing the square + slider
+let pickerOpen = false;
+
+function togglePicker() {
+  pickerOpen = !pickerOpen;
+  q('#colorPopover').classList.toggle('open', pickerOpen);
+  q('#colorChevron').classList.toggle('open', pickerOpen);
 }
+
+function updateColorBar() {
+  const hex = (activeSlot >= 0) ? slotColors[activeSlot] : uniColor.replace('#','').toUpperCase();
+  q('#colorBarSwatch').style.background = '#'+hex;
+  q('#colorBarHex').textContent = '#'+hex;
+}
+
+function hsvToHex(h, s, v) {
+  const c = v*s, x = c*(1-Math.abs((h/60)%2-1)), m = v-c;
+  let r=0,g=0,b=0;
+  if      (h<60)  { r=c; g=x; b=0; }
+  else if (h<120) { r=x; g=c; b=0; }
+  else if (h<180) { r=0; g=c; b=x; }
+  else if (h<240) { r=0; g=x; b=c; }
+  else if (h<300) { r=x; g=0; b=c; }
+  else            { r=c; g=0; b=x; }
+  const toHex = n => Math.round((n+m)*255).toString(16).padStart(2,'0');
+  return (toHex(r)+toHex(g)+toHex(b)).toUpperCase();
+}
+
+function hexToHsv(hex) {
+  const r=parseInt(hex.substr(0,2),16)/255, g=parseInt(hex.substr(2,2),16)/255, b=parseInt(hex.substr(4,2),16)/255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+  let h=0;
+  if (d!==0) {
+    if      (max===r) h = 60*(((g-b)/d)%6);
+    else if (max===g) h = 60*((b-r)/d+2);
+    else               h = 60*((r-g)/d+4);
+  }
+  if (h<0) h+=360;
+  return { h, s: max===0?0:d/max, v: max };
+}
+
+function updateSquareVisual() {
+  q('#hsSquare').style.setProperty('--pick-hue', '#'+hsvToHex(curHue,1,1));
+  const cur = q('#hsCursor');
+  cur.style.left = (curSat*100)+'%';
+  cur.style.top  = ((1-curVal)*100)+'%';
+}
+
+function paintSwatches() {
+  for (let i=0;i<4;i++) {
+    const el = q('#swatch'+i);
+    const empty = i > 0 && !slotFilled[i];
+    el.classList.toggle('empty', empty);
+    el.style.background = empty ? '' : ('#'+slotColors[i]);
+    el.classList.toggle('selected', activeSlot===i);
+  }
+}
+
+function applyActiveColorLive() {
+  if (activeSlot < 0) return;
+  const hex = slotColors[activeSlot];
+  uniColor = '#'+hex;
+  qSend('QACOLOR', hex);
+  updateColorBar();
+}
+
+function selectSlot(i) {
+  activeSlot = i;
+  if (i > 0 && !slotFilled[i]) {
+    // first use of an empty slot — adopt whatever the square is currently
+    // showing rather than jumping the cursor to some arbitrary color
+    slotColors[i] = hsvToHex(curHue, curSat, curVal);
+    slotFilled[i] = true;
+  } else {
+    const hsv = hexToHsv(slotColors[i]);
+    curHue = hsv.h; curSat = hsv.s; curVal = hsv.v;
+  }
+  q('#hueSlider').value = Math.round(curHue);
+  q('#hueSlider').disabled = (i === 0);
+  q('#hsSquare').classList.toggle('locked', i === 0);
+  updateSquareVisual();
+  paintSwatches();
+  applyActiveColorLive();
+  sendNow('QACOLOR', slotColors[i]);   // slot taps should feel instant, not debounced
+}
+
+function onHueInput(val) {
+  if (activeSlot <= 0) return;   // slot 0 can never change
+  curHue = parseFloat(val);
+  slotColors[activeSlot] = hsvToHex(curHue, curSat, curVal);
+  updateSquareVisual();
+  paintSwatches();
+  applyActiveColorLive();
+}
+
+let hsDragging = false;
+function hsPointerToSatVal(clientX, clientY) {
+  const rect = q('#hsSquare').getBoundingClientRect();
+  const x = Math.min(Math.max(clientX-rect.left, 0), rect.width);
+  const y = Math.min(Math.max(clientY-rect.top, 0), rect.height);
+  return { s: x/rect.width, v: 1-(y/rect.height) };
+}
+function hsPointerDown(ev) {
+  if (activeSlot <= 0) return;   // slot 0 can never change
+  hsDragging = true;
+  hsPointerMove(ev);
+}
+function hsPointerMove(ev) {
+  if (!hsDragging) return;
+  const pt = ev.touches ? ev.touches[0] : ev;
+  const { s, v } = hsPointerToSatVal(pt.clientX, pt.clientY);
+  curSat = s; curVal = v;
+  slotColors[activeSlot] = hsvToHex(curHue, curSat, curVal);
+  updateSquareVisual();
+  paintSwatches();
+  applyActiveColorLive();
+}
+function hsPointerUp() {
+  if (hsDragging && activeSlot > 0) sendNow('QACOLOR', slotColors[activeSlot]);
+  hsDragging = false;
+}
+q('#hsSquare').addEventListener('mousedown', hsPointerDown);
+q('#hsSquare').addEventListener('touchstart', hsPointerDown, {passive:true});
+window.addEventListener('mousemove', hsPointerMove);
+window.addEventListener('touchmove', hsPointerMove, {passive:true});
+window.addEventListener('mouseup', hsPointerUp);
+window.addEventListener('touchend', hsPointerUp);
 
 // ── PATTERN-SPECIFIC TUNING ────────────────────────────
 function onPct(cmd, labelId, val) {
@@ -630,10 +816,22 @@ function applyState(stateStr) {
     else          t.classList.add('off');
   }
 
-  // color
+  // color — reflect the device's actual running color in the picker.
+  // If it matches one of our 4 saved slots, select that slot; otherwise
+  // just position the square/slider to it with no slot highlighted.
   if (s.COLOR) {
-    uniColor = '#' + s.COLOR.toLowerCase();
-    q('#qaColor').value = uniColor;
+    const hex = s.COLOR.toUpperCase();
+    uniColor = '#' + hex;
+    const matchIdx = slotColors.findIndex((c, i) => (i === 0 || slotFilled[i]) && c === hex);
+    activeSlot = matchIdx >= 0 ? matchIdx : -1;
+    const hsv = hexToHsv(hex);
+    curHue = hsv.h; curSat = hsv.s; curVal = hsv.v;
+    q('#hueSlider').value = Math.round(curHue);
+    q('#hueSlider').disabled = (activeSlot === 0);
+    q('#hsSquare').classList.toggle('locked', activeSlot === 0);
+    updateSquareVisual();
+    paintSwatches();
+    updateColorBar();
   }
 
   // select the running QA button (without sending QA command back)
@@ -688,6 +886,9 @@ function applyState(stateStr) {
 // ── INIT ───────────────────────────────────────────────
 setConnState('disconnected');
 paint();
+updateSquareVisual();
+paintSwatches();
+updateColorBar();
 </script>
 </body>
 </html>
