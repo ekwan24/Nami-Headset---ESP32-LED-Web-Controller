@@ -9,7 +9,7 @@ This project's `CLAUDE.md` has a standing rule: always ask the user before rebui
 
 ## Why each step exists
 
-The ESP32 shows up as a USB-serial device whose COM port number can shift between sessions (different USB port, driver re-enumeration, etc.), so it's confirmed fresh each time rather than assumed. The flash-storage percentage is worth watching because this sketch has been running close to its program storage limit (~95% as of 2026-08-08) — if it ever crosses 100%, compilation itself will fail with a clear error, but it's worth flagging early if it's climbing. And the boot-log check exists because a "successful" upload (exit code 0, hash verified) only proves the *bytes* made it onto the flash chip — it doesn't prove the firmware actually boots and runs correctly. Reading the serial output after reset is the only way to confirm that.
+The ESP32 shows up as a USB-serial device whose COM port number can shift between sessions (different USB port, driver re-enumeration, etc.), so it's confirmed fresh each time rather than assumed. The FQBN must always include `PartitionScheme=min_spiffs` — omitting it silently reverts to a smaller partition layout that no longer matches what's on the board (switched 2026-08-08, storage usage dropped from 95% to 63% of the app slot as a result). Still worth watching the flash-storage percentage after any addition — if it ever crosses 100%, compilation fails with a clear error, but it's worth flagging early if it's climbing. And the boot-log check exists because a "successful" upload (exit code 0, hash verified) only proves the *bytes* made it onto the flash chip — it doesn't prove the firmware actually boots and runs correctly. Reading the serial output after reset is the only way to confirm that.
 
 ## Steps
 
@@ -23,14 +23,14 @@ Look for **"Silicon Labs CP210x USB to UART Bridge"** — note its COM number (i
 ```powershell
 $cli = "C:\Program Files\Arduino CLI\arduino-cli.exe"
 $cfg = "$env:USERPROFILE\.arduino15cli\arduino-cli.yaml"
-& $cli --config-file $cfg compile --fqbn esp32:esp32:esp32 "<repo>\Nami_Headset_LEDs"
+& $cli --config-file $cfg compile --fqbn "esp32:esp32:esp32:PartitionScheme=min_spiffs" "<repo>\Nami_Headset_LEDs"
 ```
 Replace `<repo>` with the actual repo path. Check for exit code 0. In the output, find the line like `Sketch uses X bytes (Y%) of program storage space` — if Y is climbing toward 100, mention it to the user even if the compile succeeded; that's useful information before it becomes a blocker.
 
 **3. Upload.**
 Same command, swap `compile` for `upload -p COM<N>` (using the port from step 1):
 ```powershell
-& $cli --config-file $cfg upload -p COM<N> --fqbn esp32:esp32:esp32 "<repo>\Nami_Headset_LEDs"
+& $cli --config-file $cfg upload -p COM<N> --fqbn "esp32:esp32:esp32:PartitionScheme=min_spiffs" "<repo>\Nami_Headset_LEDs"
 ```
 
 **Known gotcha:** if the upload fails partway with the COM port *completely disappearing* from Windows (not just "port busy" — actually gone), that's a physical USB connection drop, not a firmware or tooling problem. Re-run the step 1 port scan:

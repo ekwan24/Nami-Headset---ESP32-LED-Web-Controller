@@ -24,13 +24,14 @@ An ESP32-based LED headset (cosplay use). 228 WS2812B LEDs (RingA 54 / Strip 120
 
 ## Firmware toolchain
 - `arduino-cli` at `C:\Program Files\Arduino CLI\arduino-cli.exe`, config at `%USERPROFILE%\.arduino15cli\arduino-cli.yaml` (points at the existing Arduino IDE data dir so it shares already-installed cores/libraries — don't reinstall ESP32 core or FastLED).
-- Board: **ESP32 Dev Module**, FQBN `esp32:esp32:esp32`.
+- Board: **ESP32 Dev Module**, flash chip confirmed **4MB** (2026-08-08, via `esptool.exe flash_id`).
+- **FQBN: `esp32:esp32:esp32:PartitionScheme=min_spiffs`** — must include the `PartitionScheme=min_spiffs` option on every compile/upload. Without it, the build silently falls back to the "Default" partition table (smaller ~1.25MB app slots instead of ~1.9MB), which no longer matches what's actually flashed on the board and risks a boot/partition mismatch. This isn't optional — always include it.
 - Flash over USB via the Silicon Labs CP210x bridge, typically **COM7** — reconfirm with:
   `Get-CimInstance -ClassName Win32_PnPEntity | Where-Object { $_.Name -match "COM\d+" }`
-- Compile: `arduino-cli --config-file <cfg> compile --fqbn esp32:esp32:esp32 Nami_Headset_LEDs`
-- Upload: same, `upload -p COM7 --fqbn esp32:esp32:esp32 Nami_Headset_LEDs`
+- Compile: `arduino-cli --config-file <cfg> compile --fqbn "esp32:esp32:esp32:PartitionScheme=min_spiffs" Nami_Headset_LEDs`
+- Upload: same, `upload -p COM7 --fqbn "esp32:esp32:esp32:PartitionScheme=min_spiffs" Nami_Headset_LEDs`
 - **Known gotcha:** if the COM port disappears mid-upload, it's a physical USB connection drop (reseat the cable), not a firmware/tooling bug — confirmed this happened once and a reseat fixed it.
-- Sketch is at **~95% of program storage** as of 2026-08-08 — check the compile output's storage percentage after any addition; a partition scheme change may eventually be needed.
+- Storage usage as of 2026-08-08 (after switching to `min_spiffs`): **63%** of the 1.9MB app slot (was 95% of the old 1.25MB slot before the switch — same firmware, bigger slot, freed by reclaiming the unused `spiffs` partition). The partition table now also has two OTA-ready app slots, which matters if WiFi/OTA is ever added later.
 
 ## Local webpage preview
 `.claude/launch.json` defines a `nami-webpage` server (`py -m http.server 5500`) for previewing the page in the Browser pane. Note this only lets you check UI/layout — Web Bluetooth won't actually pair with the real headset from a sandboxed/remote browser context, only from a real local Chrome (or Bluefy/WebBLE on iOS).
