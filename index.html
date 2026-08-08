@@ -91,7 +91,7 @@
   input[type=range] { height:30px; -webkit-appearance:none; background:transparent; }
 
   /* Custom color picker: hue+sat square + hue slider + preset swatches */
-  .hs-square { position:relative; width:100%; aspect-ratio:16/9; border-radius:10px;
+  .hs-square { position:relative; width:100%; height:150px; border-radius:10px;
     cursor:crosshair; margin-bottom:10px; touch-action:none; transition:opacity .15s;
     background: linear-gradient(to top, #000, rgba(0,0,0,0)),
                 linear-gradient(to right, #fff, var(--pick-hue, #80e2e5)); }
@@ -110,7 +110,7 @@
     background:#fff; border:2px solid var(--border); }
   .hue-slider:disabled { opacity:.5; }
   .swatch-row { display:flex; gap:10px; }
-  .swatch { flex:1; aspect-ratio:1; padding:0; cursor:pointer; border-radius:8px;
+  .swatch { flex:1; height:40px; padding:0; cursor:pointer; border-radius:8px;
     border:2px solid var(--border); background:var(--card2); position:relative; }
   .swatch.selected { border-color:var(--accent); box-shadow:0 0 0 2px var(--card), 0 0 0 4px var(--accent); }
   .swatch.locked::after { content:''; position:absolute; right:4px; bottom:4px;
@@ -289,7 +289,7 @@
 
 </div>
 
-<div class="stamp">Last updated: 2026-08-06 20:05 UTC</div>
+<div class="stamp">Last updated: 2026-08-08 15:00 UTC</div>
 
 <script>
 // ── BLE UUIDs ──────────────────────────────────────────
