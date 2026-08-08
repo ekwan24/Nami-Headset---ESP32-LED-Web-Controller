@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <esp_gap_ble_api.h>
 #include <math.h>
+#include <string.h>
 
 // ============================================================
 // LED HARDWARE
@@ -375,52 +376,66 @@ int8_t getHueTick(const SegSettings &sg) {
 
 // Build a state string the webpage can parse on connect.
 // Format: "QA:N,ON:0/1,COLOR:RRGGBB,BRIGHT:pct,BASE:pct,MINBR:pct,MAXBR:pct,SPD:tick,TRAIL:val,WBRIGHT:pct"
-String buildStateString() {
+// Written into a caller-supplied fixed buffer via snprintf rather than
+// built with Arduino String concatenation — this runs on every state read
+// (e.g. every reconnect), and repeated String += allocates/frees heap each
+// time, which can fragment memory on a device that stays powered for weeks.
+void buildStateString(char *out, size_t outSize) {
   const SegSettings &sg = QA[runQA].seg[0];  // all 3 segs are identical, read seg 0
-  char color[8];
-  snprintf(color, sizeof(color), "%02X%02X%02X", sg.r, sg.g, sg.b);
-
-  String s = "";
-  s += "QA:";      s += runQA;
-  s += ",ON:";      s += ledsOn ? "1" : "0";
-  s += ",COLOR:";   s += color;
-  s += ",BRIGHT:";  s += to_pct(sg.brightness);
-  s += ",BASE:";    s += to_pct(sg.baseBright);
-  s += ",MINBR:";   s += to_pct(sg.minBright);
-  s += ",MAXBR:";   s += to_pct(sg.maxBright);
-  s += ",SPD:";     s += getSpeedTick(sg);
-  s += ",TRAIL:";   s += sg.trail;
-  s += ",WBRIGHT:"; s += (int)(waveBrightScale * 100 + 0.5f);
-  s += ",RSPD:";    s += getHueTick(sg);
-  return s;
+  snprintf(out, outSize,
+    "QA:%u,ON:%d,COLOR:%02X%02X%02X,BRIGHT:%u,BASE:%u,MINBR:%u,MAXBR:%u,SPD:%d,TRAIL:%u,WBRIGHT:%d,RSPD:%d",
+    runQA, ledsOn ? 1 : 0, sg.r, sg.g, sg.b,
+    to_pct(sg.brightness), to_pct(sg.baseBright), to_pct(sg.minBright), to_pct(sg.maxBright),
+    getSpeedTick(sg), sg.trail, (int)(waveBrightScale * 100 + 0.5f), getHueTick(sg));
 }
 
 class StateCallback : public BLECharacteristicCallbacks {
   void onRead(BLECharacteristic *c) {
-    String state = buildStateString();
-    c->setValue(state.c_str());
+    char buf[128];
+    buildStateString(buf, sizeof(buf));
+    c->setValue((uint8_t*)buf, strlen(buf));
   }
 };
 
+// Longest real command is "WAVEBRIGHT:100" (14 chars); this caps well above
+// that so any legitimate write fits, while anything wildly longer — a stray
+// reconnect storm, another BLE client scribbling garbage — gets dropped
+// before it's even parsed instead of costing a String allocation.
+#define MAX_CMD_LEN 32
+
 class CmdCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) {
-    String v = c->getValue().c_str();
-    v.trim();
-    if (v.length() < 1) return;
+    // getValue() itself hands back one Arduino String (unavoidable — that's
+    // the BLE library's own API); everything downstream copies straight
+    // into a fixed stack buffer instead of chaining more String allocations
+    // (trim/substring), which is what actually added up on every write.
+    String raw = c->getValue();
+    if (raw.length() < 1 || raw.length() >= MAX_CMD_LEN) return;
 
-    int    colon = v.indexOf(':');
-    String cmd   = (colon >= 0) ? v.substring(0, colon) : v;
-    String arg   = (colon >= 0) ? v.substring(colon + 1) : "";
+    char buf[MAX_CMD_LEN];
+    memcpy(buf, raw.c_str(), raw.length());
+    buf[raw.length()] = '\0';
+
+    char *start = buf;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') start++;
+    char *end = start + strlen(start);
+    while (end > start && (end[-1]==' '||end[-1]=='\t'||end[-1]=='\r'||end[-1]=='\n')) *--end = '\0';
+    if (*start == '\0') return;
+
+    char *colon = strchr(start, ':');
+    const char *cmd = start;
+    const char *arg = "";
+    if (colon) { *colon = '\0'; arg = colon + 1; }
 
     // Tuning commands apply to the RUNNING Quick Access effect's 3 segments.
     // Helper: apply a lambda to all 3 segments of the running QA slot.
     #define FOR_QA_SEGS(BODY) for (int _i=0;_i<3;_i++){ SegSettings &sg = QA[runQA].seg[_i]; BODY }
 
-    if (cmd == "PAT") {
-      FOR_QA_SEGS( sg.pattern = constrain((int)arg.toInt(), 0, 3); )
+    if (strcmp(cmd, "PAT") == 0) {
+      FOR_QA_SEGS( sg.pattern = constrain((int)atol(arg), 0, 3); )
 
-    } else if (cmd == "COLOR" || cmd == "QACOLOR") {
-      long rgb = strtol(arg.c_str(), NULL, 16);
+    } else if (strcmp(cmd, "COLOR") == 0 || strcmp(cmd, "QACOLOR") == 0) {
+      long rgb = strtol(arg, NULL, 16);
       uint8_t nr=(rgb>>16)&0xFF, ng=(rgb>>8)&0xFF, nb=rgb&0xFF;
       // color is universal — apply to ALL 4 QA slots, all segments
       // (Rainbow ignores r/g/b at render time, but keeping it in sync
@@ -431,55 +446,55 @@ class CmdCallback : public BLECharacteristicCallbacks {
           QA[qi].seg[si].r=nr; QA[qi].seg[si].g=ng; QA[qi].seg[si].b=nb;
         }
 
-    } else if (cmd == "BRIGHT") {
+    } else if (strcmp(cmd, "BRIGHT") == 0) {
       // peak/head brightness (Solid + Waves) — if base is now above peak, pull base down to match
-      uint8_t val = pctTo255(constrain((int)arg.toInt(), 0, 100), 0);
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
       FOR_QA_SEGS( sg.brightness = val; if (sg.baseBright > val) sg.baseBright = val; )
 
-    } else if (cmd == "BASE") {
+    } else if (strcmp(cmd, "BASE") == 0) {
       // base brightness (Waves) — capped at current peak brightness, never brighter than peak
-      uint8_t val = pctTo255(constrain((int)arg.toInt(), 0, 100), 0);
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
       FOR_QA_SEGS( sg.baseBright = min(val, sg.brightness); )
 
-    } else if (cmd == "MINBR") {
-      uint8_t val = pctTo255(constrain((int)arg.toInt(), 0, 100), 0);
+    } else if (strcmp(cmd, "MINBR") == 0) {
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
       FOR_QA_SEGS( sg.minBright = val; )
 
-    } else if (cmd == "MAXBR") {
-      uint8_t val = pctTo255(constrain((int)arg.toInt(), 0, 100), 0);
+    } else if (strcmp(cmd, "MAXBR") == 0) {
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
       FOR_QA_SEGS( sg.maxBright = val; )
 
-    } else if (cmd == "SPD") {
-      int tick = constrain((int)arg.toInt(), -5, 5);
+    } else if (strcmp(cmd, "SPD") == 0) {
+      int tick = constrain((int)atol(arg), -5, 5);
       FOR_QA_SEGS( applySpeedTick(tick, sg); )
 
-    } else if (cmd == "TRAIL") {
-      uint8_t val = constrain((int)arg.toInt(), 1, 30);
+    } else if (strcmp(cmd, "TRAIL") == 0) {
+      uint8_t val = constrain((int)atol(arg), 1, 30);
       FOR_QA_SEGS( sg.trail = val; )
 
-    } else if (cmd == "HUESPD") {
+    } else if (strcmp(cmd, "HUESPD") == 0) {
       // Rainbow only: independent hue-cycling speed
-      int tick = constrain((int)arg.toInt(), -5, 5);
+      int tick = constrain((int)atol(arg), -5, 5);
       FOR_QA_SEGS( applyHueTick(tick, sg); )
 
-    } else if (cmd == "QA") {
+    } else if (strcmp(cmd, "QA") == 0) {
       // run a quick access effect
-      runQA = constrain((int)arg.toInt(), 0, 3);
+      runQA = constrain((int)atol(arg), 0, 3);
       saveRunningState();
 
-    } else if (cmd == "ON") {
+    } else if (strcmp(cmd, "ON") == 0) {
       ledsOn = true;
       prefs.putBool("ledsOn", true);
 
-    } else if (cmd == "OFF") {
+    } else if (strcmp(cmd, "OFF") == 0) {
       ledsOn = false;
       prefs.putBool("ledsOn", false);
 
-    } else if (cmd == "WAVEBRIGHT") {
+    } else if (strcmp(cmd, "WAVEBRIGHT") == 0) {
       // master brightness for Waves pattern only — scales base + trail/peak proportionally
-      waveBrightScale = constrain((int)arg.toInt(), 0, 100) / 100.0f;
+      waveBrightScale = constrain((int)atol(arg), 0, 100) / 100.0f;
 
-    } else if (cmd == "RESET") {
+    } else if (strcmp(cmd, "RESET") == 0) {
       // restore the currently running Quick Access effect (color + all its
       // sliders) back to its firmware-defined defaults. Other QA slots are
       // untouched, matching how tuning commands only ever affect runQA.
@@ -495,7 +510,26 @@ class CmdCallback : public BLECharacteristicCallbacks {
 // SETUP
 // ============================================================
 void setup() {
+  // Drop from the default 240MHz to 80MHz — the lowest clock Espressif
+  // supports with BLE active (below that the radio stack destabilizes).
+  // Reduces active-mode CPU current for this workload (LED rendering + a
+  // low-traffic BLE peripheral, no WiFi). RMT (LED timing) and the hardware
+  // timer behind millis()/delay() (frame pacing) both run off clocks
+  // independent of this, so they shouldn't be affected — but per-frame
+  // render cost (Rainbow's hsv2rgb_rainbow especially) takes ~3x longer in
+  // wall-clock terms at this speed, so watch actual frame timing on a real
+  // run before trusting this stays inside the FRAME_INTERVAL_MS budget.
+  setCpuFrequencyMhz(80);
+
   Serial.begin(115200);
+
+  // On ESP32, FastLED's WS2812 output should go through the RMT peripheral,
+  // not a bit-banged path that disables interrupts for the ~7ms it takes to
+  // shift out 228 LEDs — that would be long enough to stall the BLE stack
+  // mid-connection-event and cause intermittent disconnects. RMT has been
+  // FastLED's ESP32 default since 3.3.x, but print the version at boot so
+  // that's a known fact for this build, not an assumption.
+  Serial.printf("FastLED version: %d\n", FASTLED_VERSION);
 
   // LED init
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS);
@@ -580,6 +614,13 @@ static uint8_t rbRingHue = 0, rbRingHueTick = 0;
 static uint8_t rbStripPos = 0, rbStripPosTick = 0;
 static uint8_t rbStripHue = 0, rbStripHueTick = 0;
 
+// Target ms per animation frame. The trailing sleep in loop() is trimmed by
+// however long rendering + FastLED.show() already took this frame, instead
+// of always sleeping a flat 10ms regardless of render cost — that kept the
+// real frame period undefined (delay(10) + variable show() time), so
+// animation speed would drift if LED count or effect cost ever changed.
+#define FRAME_INTERVAL_MS 20
+
 // Render one segment's Solid or Breathe pattern (Waves is handled separately
 // per-segment-type in loop(), since ring waves and strip waves use different
 // rendering logic). `phase` is that segment's persistent breathe-cycle state.
@@ -594,16 +635,17 @@ void renderSegment(uint16_t start, uint16_t count, const SegSettings &sg, float 
 }
 
 void loop() {
+  uint32_t frameStartMs = millis();
+
   // frame delta time, used to advance breathe phase smoothly regardless of
   // BLE/RSSI jitter in loop timing
-  uint32_t nowMs = millis();
-  float    dt    = (lastFrameMs == 0) ? 0.0f : (nowMs - lastFrameMs) / 1000.0f;
-  lastFrameMs    = nowMs;
+  float dt = (lastFrameMs == 0) ? 0.0f : (frameStartMs - lastFrameMs) / 1000.0f;
+  lastFrameMs = frameStartMs;
 
   // RSSI ~1/sec
   static uint32_t lastRssiMs = 0;
-  if (clientConn && millis() - lastRssiMs > 1000) {
-    lastRssiMs = millis();
+  if (clientConn && frameStartMs - lastRssiMs > 1000) {
+    lastRssiMs = frameStartMs;
     esp_ble_gap_read_rssi(clientAddr);
     if (rssiChar && lastRssi != 0) {
       char buf[8];
@@ -613,12 +655,24 @@ void loop() {
     }
   }
 
+  // Once LEDs are off, push the all-black frame exactly once instead of
+  // every 20ms forever — WS2812 holds its last latched value on its own,
+  // so re-sending unchanged black data bought nothing but kept the CPU
+  // fully active the whole time the headset sits powered-on-but-dark.
+  // Idling longer here doesn't hurt responsiveness: BLE writes (including
+  // the ON command that clears this) run in the BLE stack's own task,
+  // independent of loop()'s cadence.
+  static bool offFrameSent = false;
   if (!ledsOn) {
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    FastLED.show();
-    delay(10);
+    if (!offFrameSent) {
+      fill_solid(leds, NUM_LEDS, CRGB::Black);
+      FastLED.show();
+      offFrameSent = true;
+    }
+    delay(100);
     return;
   }
+  offFrameSent = false;
 
   Preset *p = runningPreset();
   const SegSettings &sgA = p->seg[0];   // Ring A
@@ -677,5 +731,7 @@ void loop() {
   }
 
   FastLED.show();
-  delay(10);
+
+  uint32_t elapsedMs = millis() - frameStartMs;
+  if (elapsedMs < FRAME_INTERVAL_MS) delay(FRAME_INTERVAL_MS - elapsedMs);
 }

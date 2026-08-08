@@ -136,7 +136,33 @@
   input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px;
     border-radius:50%; background:var(--accent); margin-top:-7px; }
 
-  .stamp { text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px; }
+  .stamp { text-align:center; color:var(--muted); font-size:12px; margin:20px 0 8px;
+    cursor:pointer; text-decoration:underline; text-decoration-color:transparent;
+    transition:color .15s, text-decoration-color .15s; }
+  .stamp:hover { color:var(--text); text-decoration-color:var(--muted); }
+
+  /* Build log modal */
+  .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6);
+    align-items:center; justify-content:center; z-index:100; padding:20px; }
+  .modal-overlay.open { display:flex; }
+  .modal { background:var(--card); border:1px solid var(--border); border-radius:14px;
+    max-width:520px; width:100%; max-height:80vh; display:flex; flex-direction:column;
+    overflow:hidden; }
+  .modal-header { display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border-bottom:1px solid var(--border); flex:none; }
+  .modal-title { font-size:16px; font-weight:700; }
+  .modal-close { background:var(--card2); color:var(--text); border:1px solid var(--border);
+    width:28px; height:28px; padding:0; border-radius:8px; font-size:14px; line-height:1; }
+  .modal-body { padding:16px; overflow-y:auto; font-size:13px; line-height:1.55; color:var(--text); }
+  .modal-body h2 { font-size:16px; margin:0 0 10px; }
+  .modal-body h3 { font-size:14px; color:var(--accent); margin:18px 0 6px; }
+  .modal-body h3:first-child { margin-top:0; }
+  .modal-body h4 { font-size:13px; margin:14px 0 4px; }
+  .modal-body p { margin:0 0 10px; }
+  .modal-body ul { margin:0 0 10px; padding-left:18px; }
+  .modal-body li { margin-bottom:4px; }
+  .modal-body hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
+  .modal-body code { background:var(--card2); padding:1px 5px; border-radius:4px; font-size:12px; }
 </style>
 </head>
 <body>
@@ -289,7 +315,17 @@
 
 </div>
 
-<div class="stamp">Last updated: 2026-08-08 15:00 UTC</div>
+<div class="stamp" onclick="openLog()" role="button" tabindex="0" title="View update log">Last updated: 2026-08-08 15:00 UTC</div>
+
+<div class="modal-overlay" id="logOverlay" onclick="if(event.target===this) closeLog()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Update Log</div>
+      <button type="button" class="modal-close" onclick="closeLog()" aria-label="Close">&#10005;</button>
+    </div>
+    <div class="modal-body" id="logBody">Loading…</div>
+  </div>
+</div>
 
 <script>
 // ── BLE UUIDs ──────────────────────────────────────────
@@ -886,6 +922,63 @@ function applyState(stateStr) {
   }
 
   paint();
+}
+
+// ── UPDATE LOG MODAL ─────────────────────────────────────
+// Fetches Update_Log.md (served alongside this page) on first open and
+// renders it with a small hand-rolled markdown pass — the log only uses a
+// handful of constructs (#/##/### headers, -, **bold**, `code`, ---), so a
+// full markdown library would be overkill for a one-file changelog viewer.
+// (The technical build log with dev-only notes lives separately in
+// Nami_Build_Log.md and is never shown in-app — this one is user-facing.)
+let logLoaded = false;
+function openLog() {
+  q('#logOverlay').classList.add('open');
+  if (!logLoaded) loadLog();
+}
+function closeLog() {
+  q('#logOverlay').classList.remove('open');
+}
+async function loadLog() {
+  const body = q('#logBody');
+  try {
+    const res = await fetch('Update_Log.md', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    body.innerHTML = renderMarkdown(await res.text());
+    logLoaded = true;
+  } catch (e) {
+    body.innerHTML = '<p style="color:var(--danger)">Could not load the update log ('
+      + escapeHtml(e.message)
+      + '). Make sure Update_Log.md is served alongside this page.</p>';
+  }
+}
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function inlineMd(s) {
+  return s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+function renderMarkdown(md) {
+  const lines = escapeHtml(md).split('\n');
+  let html = '', inList = false;
+  const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+  for (const line of lines) {
+    if (/^### /.test(line)) { closeList(); html += '<h4>' + inlineMd(line.slice(4)) + '</h4>'; continue; }
+    if (/^## /.test(line))  { closeList(); html += '<h3>' + inlineMd(line.slice(3)) + '</h3>'; continue; }
+    if (/^# /.test(line))   { closeList(); html += '<h2>' + inlineMd(line.slice(2)) + '</h2>'; continue; }
+    if (/^---\s*$/.test(line)) { closeList(); html += '<hr>'; continue; }
+    if (/^- /.test(line)) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += '<li>' + inlineMd(line.slice(2)) + '</li>';
+      continue;
+    }
+    if (line.trim() === '') { closeList(); continue; }
+    closeList();
+    html += '<p>' + inlineMd(line) + '</p>';
+  }
+  closeList();
+  return html;
 }
 
 // ── INIT ───────────────────────────────────────────────
