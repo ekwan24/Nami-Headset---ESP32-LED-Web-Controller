@@ -925,12 +925,12 @@ function applyState(stateStr) {
 }
 
 // ── UPDATE LOG MODAL ─────────────────────────────────────
-// Fetches Update_Log.md (served alongside this page) on first open and
+// Fetches User_Log.md (served alongside this page) on first open and
 // renders it with a small hand-rolled markdown pass — the log only uses a
 // handful of constructs (#/##/### headers, -, **bold**, `code`, ---), so a
 // full markdown library would be overkill for a one-file changelog viewer.
 // (The technical build log with dev-only notes lives separately in
-// Nami_Build_Log.md and is never shown in-app — this one is user-facing.)
+// Dev_Log.md and is never shown in-app — this one is user-facing.)
 let logLoaded = false;
 function openLog() {
   q('#logOverlay').classList.add('open');
@@ -942,14 +942,14 @@ function closeLog() {
 async function loadLog() {
   const body = q('#logBody');
   try {
-    const res = await fetch('Update_Log.md', { cache: 'no-store' });
+    const res = await fetch('User_Log.md', { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     body.innerHTML = renderMarkdown(await res.text());
     logLoaded = true;
   } catch (e) {
     body.innerHTML = '<p style="color:var(--danger)">Could not load the update log ('
       + escapeHtml(e.message)
-      + '). Make sure Update_Log.md is served alongside this page.</p>';
+      + '). Make sure User_Log.md is served alongside this page.</p>';
   }
 }
 function escapeHtml(s) {
