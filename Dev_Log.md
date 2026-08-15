@@ -112,6 +112,16 @@ Reconstructed from project chat history. Each entry = one rebuild session. Newes
 - Updated `CLAUDE.md` and the `rebuild-and-flash` skill to require `PartitionScheme=min_spiffs` on every future compile/upload — omitting it would silently revert to the old, smaller partition layout, which would no longer match what's actually on the board and risks a boot/partition mismatch on the next flash.
 - This also means WiFi/OTA (discussed earlier today) has meaningfully more room to work with now — not confirmed it fits, but the ~630KB of extra headroom this freed is exactly the kind of space that discussion flagged as needed.
 
+### 2026-08-14 — ESP32-C6 port (Seeed XIAO ESP32-C6), verified working on hardware
+**Files:** new `Nami_Headset_LEDs_C6/Nami_Headset_LEDs_C6.ino` (original `Nami_Headset_LEDs/Nami_Headset_LEDs.ino` untouched — both firmwares now maintained in parallel). `index.html` unchanged — BLE name/UUIDs/command protocol aren't chip-dependent.
+- Researched risk areas before porting: FastLED has open 2026 GitHub issues on ESP32-C6 (RMT5 "No Engine" errors, DMA-not-supported crashes, reported WS2812 timing bugs) — flagged as the biggest unknown going in. In practice, compiled and ran clean with the installed FastLED 3.10.5 / esp32 core 3.3.11 — no workaround needed.
+- **LED_PIN changed 5 → 21**: GPIO5 is a JTAG pin on the XIAO ESP32-C6 (unusable as general GPIO on this board). GPIO21 (silkscreened `D3`) is the cleanest unshared GPIO in the board's 11-pin breakout (D0-D2 are ADC-capable, D4-D10 are tied to I2C/UART/SPI).
+- **BLE stack is NimBLE on this core/target, not Bluedroid** (the classic ESP32 build's stack) — confirmed the C6 build doesn't ship `esp_gap_ble_api.h` at all. Ported the RSSI-read path: removed the Bluedroid async `gapCallback`/`esp_ble_gap_read_rssi()` pattern, replaced with NimBLE's synchronous `ble_gap_conn_rssi(connHandle, &lastRssi)`, keyed off a `connHandle` (`uint16_t`) captured in `ServerCallback::onConnect(BLEServer*, ble_gap_conn_desc*)` instead of Bluedroid's `esp_bd_addr_t`. Same RSSI characteristic/format on the wire, so `index.html` needed no changes.
+- `setCpuFrequencyMhz(80)` kept as-is — confirmed 80MHz is a valid frequency step for this board (Arduino menu lists 160/80/40/20/10; C6 maxes at 160MHz vs. 240MHz on the classic ESP32). Comment updated to reflect the correct max-clock figure.
+- Board specifics used for the FQBN: `esp32:esp32:XIAO_ESP32C6`, 4MB flash, no `min_spiffs` option available on this board — used `PartitionScheme=no_ota` (2MB APP/2MB unused SPIFFS) instead, since this board's flash layout doesn't offer 6-digit granularity like the classic ESP32's did and SPIFFS isn't used by this project anyway. Compiled: 887,402 bytes (42% of 2MB app partition), 27,832 bytes RAM (8%) — comfortable headroom.
+- USB is native CDC (no CP210x bridge) — enumerated as `USB Serial Device` (VID_303A, Espressif's own vendor ID) on COM8, `CDCOnBoot=cdc` already the board default.
+- **First flash succeeded**: compiled + uploaded via `arduino-cli` over COM8, hash-verified on every partition (bootloader/partitions/boot_app0/app), clean reset. **User confirmed working on real hardware** — LEDs and BLE control both functioning from the webpage.
+
 ---
 
 ## Current state (as of latest files on hand)

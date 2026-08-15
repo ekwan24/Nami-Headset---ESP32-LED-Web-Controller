@@ -1,5 +1,8 @@
 # Nami Headset — Update Log
 
+## 2026-08-14
+- The headset firmware now also works on a new, smaller controller board (ESP32-C6) — no change for anyone using the existing setup.
+
 ## 2026-08-08
 - The control page is now hosted online — no computer needed. Open it from your phone from anywhere and it connects straight to the headset over Bluetooth, confirmed working at a real test.
 - Note for iPhone users: Safari doesn't support the Bluetooth connection this app needs. Install a free/cheap browser app like Bluefy or WebBLE and open the page there instead — everything else works the same.
