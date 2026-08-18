@@ -94,7 +94,7 @@
   .hs-square { position:relative; width:100%; height:150px; border-radius:10px;
     cursor:crosshair; margin-bottom:10px; touch-action:none; transition:opacity .15s;
     background: linear-gradient(to top, #000, rgba(0,0,0,0)),
-                linear-gradient(to right, #fff, var(--pick-hue, #80e2e5)); }
+                linear-gradient(to right, #fff, var(--pick-hue, #006eff)); }
   .hs-square.locked { cursor:default; opacity:.5; }
   .hs-cursor { position:absolute; width:16px; height:16px; border-radius:50%;
     border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.45);
@@ -223,7 +223,7 @@
     <label>Color</label>
     <button type="button" class="color-bar" id="colorBar" onclick="togglePicker()">
       <span class="color-bar-swatch" id="colorBarSwatch"></span>
-      <span class="color-bar-hex" id="colorBarHex">#80E2E5</span>
+      <span class="color-bar-hex" id="colorBarHex">#006EFF</span>
       <svg class="color-chevron" id="colorChevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="6 9 12 15 18 9"/>
       </svg>
@@ -232,9 +232,9 @@
       <div class="hs-square" id="hsSquare">
         <div class="hs-cursor" id="hsCursor"></div>
       </div>
-      <input type="range" class="hue-slider" id="hueSlider" min="0" max="359" value="176" step="1" oninput="onHueInput(this.value)">
+      <input type="range" class="hue-slider" id="hueSlider" min="0" max="359" value="214" step="1" oninput="onHueInput(this.value)">
       <div class="swatch-row" id="swatchRow">
-        <button type="button" class="swatch locked" id="swatch0" onclick="selectSlot(0)" aria-label="Default teal (fixed)"></button>
+        <button type="button" class="swatch locked" id="swatch0" onclick="selectSlot(0)" aria-label="Default blue (fixed)"></button>
         <button type="button" class="swatch" id="swatch1" onclick="selectSlot(1)" aria-label="Color slot 2"></button>
         <button type="button" class="swatch" id="swatch2" onclick="selectSlot(2)" aria-label="Color slot 3"></button>
         <button type="button" class="swatch" id="swatch3" onclick="selectSlot(3)" aria-label="Color slot 4"></button>
@@ -346,7 +346,7 @@ let isReconnecting   = false;     // true while attemptReconnect() is actively r
 let reconnectAbort   = false;     // set true to stop an in-progress reconnect loop early
 
 // universal values (persist across QA switches)
-let uniColor  = '#80e2e5';
+let uniColor  = '#006eff';
 
 // per-QA pattern-specific defaults (shown when switching to that QA)
 // Fallback only — used to populate the tuning panel if a live read from the
@@ -355,9 +355,9 @@ let uniColor  = '#80e2e5';
 // syncStateFromDevice(); these numbers are not guaranteed to match the
 // firmware's current #define values and should not be relied on.
 const QA_DEFAULTS = {
-  0: { solidbr:30 },                          // Solid: brightness
-  1: { minbr:10, maxbr:30, spd:0 },           // Breathe
-  2: { wavemaster:100, wavebr:25, base:15, spd:0, trail:20 }, // Waves
+  0: { solidbr:100 },                          // Solid: brightness
+  1: { minbr:5, maxbr:35, spd:0 },             // Breathe
+  2: { wavemaster:100, wavebr:100, base:25, spd:1, trail:20 }, // Waves
   3: { solidbr:25, spd:0, rainbowspd:0 }                      // Rainbow
 };
 
@@ -678,16 +678,16 @@ function paint() {
 }
 
 // ── UNIVERSAL TUNING: custom color picker ──────────────
-// 4 preset slots. Slot 0 is fixed to the firmware's default teal and can
+// 4 preset slots. Slot 0 is fixed to the firmware's default blue and can
 // never be edited — it's always one tap back to the original look. Slots
-// 1-3 start as copies of that same teal but can be repainted by dragging
+// 1-3 start as copies of that same blue but can be repainted by dragging
 // the hue+sat square / hue slider while that slot is selected. Whichever
 // slot is selected is what's currently live on the LEDs.
-const DEFAULT_HEX = '80E2E5';
+const DEFAULT_HEX = '006EFF';
 let slotColors = [DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX];
 let slotFilled = [true, false, false, false];   // slot 0 always "filled" (it's the fixed default); 1-3 start empty
 let activeSlot  = 0;    // -1 = a synced device color didn't match any saved slot
-let curHue = 176, curSat = 0.44, curVal = 0.90;   // HSV backing the square + slider
+let curHue = 214, curSat = 1.0, curVal = 1.0;   // HSV backing the square + slider
 let pickerOpen = false;
 
 function togglePicker() {

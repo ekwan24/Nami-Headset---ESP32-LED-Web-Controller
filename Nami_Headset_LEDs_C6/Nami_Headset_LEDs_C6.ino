@@ -11,17 +11,19 @@
 // LED HARDWARE
 // ============================================================
 // GPIO5 (the pin used on the classic ESP32 build) is a JTAG pin on the
-// Seeed XIAO ESP32-C6 and unusable for general GPIO. D3/GPIO21 is a plain,
-// unshared GPIO on this board's pinout (D0-D2 are ADC-capable, D4-D10 are
-// tied up with I2C/UART/SPI), so it's used here instead.
-#define LED_PIN      21
+// Seeed XIAO ESP32-C6 and unusable for general GPIO. D4-D10 carry default
+// silkscreen labels for I2C/UART/SPI (D10/GPIO18 = MOSI), but this sketch
+// never initializes those peripherals, so the pins are electrically free —
+// same reasoning already applied to D3/GPIO21 (nominally SPI SS) before this
+// pin was moved here. D10/GPIO18 isn't a JTAG or boot-strapping pin either.
+#define LED_PIN      18
 #define LED_TYPE     WS2812B
 #define COLOR_ORDER  GRB
 
 #define RINGA_LEDS   54
-#define STRIP_LEDS   120
+#define STRIP_LEDS   69
 #define RINGB_LEDS   54
-#define NUM_LEDS     (RINGA_LEDS + STRIP_LEDS + RINGB_LEDS)  // 228
+#define NUM_LEDS     (RINGA_LEDS + STRIP_LEDS + RINGB_LEDS)  // 176
 #define RINGA_START  0
 #define STRIP_START  RINGA_LEDS
 #define RINGB_START  (RINGA_LEDS + STRIP_LEDS)
@@ -40,12 +42,12 @@ CRGB leds[NUM_LEDS];
 // ============================================================
 
 // Shared color for all 3 Quick Access effects (hex RGB)
-#define QA_COLOR_R  0x80
-#define QA_COLOR_G  0xE2
-#define QA_COLOR_B  0xE5
+#define QA_COLOR_R  0x00
+#define QA_COLOR_G  0x6E
+#define QA_COLOR_B  0xFF
 
 // ---- Default 1: Solid ----
-#define QA1_BRIGHTNESS_PCT       10   // overall brightness
+#define QA1_BRIGHTNESS_PCT       100   // overall brightness
 
 // ---- Default 2: Breathe ----
 #define QA2_MIN_BRIGHTNESS_PCT   5   // dimmest point of the breathing cycle
@@ -53,9 +55,9 @@ CRGB leds[NUM_LEDS];
 #define QA2_SPEED_TICK           0   // breathing speed
 
 // ---- Default 3: Waves ----
-#define QA3_PEAK_BRIGHTNESS_PCT  25   // brightness at the head of each wave
-#define QA3_BASE_BRIGHTNESS_PCT  5   // brightness of the background glow
-#define QA3_SPEED_TICK            0   // wave travel speed
+#define QA3_PEAK_BRIGHTNESS_PCT  100   // brightness at the head of each wave
+#define QA3_BASE_BRIGHTNESS_PCT  25   // brightness of the background glow
+#define QA3_SPEED_TICK            1   // wave travel speed
 #define QA3_TRAIL_LENGTH         20   // how many LEDs long the fading trail is (1-30)
 
 // ---- Default 3 (Waves) specific: Ring B rotation ----
