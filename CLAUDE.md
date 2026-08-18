@@ -7,8 +7,14 @@ An ESP32-based LED headset (cosplay use). 176 WS2812B LEDs (RingA 54 / Strip 69 
 - `Nami_Headset_LEDs_C6/Nami_Headset_LEDs_C6.ino` — **active firmware**, for the Seeed XIAO ESP32-C6 board currently in the headset. Must live in a folder whose name matches the `.ino` filename exactly — the Arduino toolchain requires this to compile/upload.
 - `Nami_Headset_LEDs/Nami_Headset_LEDs.ino` — **archived** classic-ESP32 firmware (2026-08-18). That board has been retired; this file is kept for reference only and is no longer actively maintained/synced with the C6 build. Don't spend effort keeping it in parity with new features or tuning changes unless specifically asked.
 - `index.html` — the control webpage. Fully self-contained (no external CSS/JS dependencies), talks to the headset directly over Web Bluetooth. Board-agnostic — BLE UUIDs/protocol are the same for both firmwares.
-- `Dev_Log.md` — technical log for us: bugs hit, lessons learned, tooling notes, compile errors. Never shown in-app.
-- `User_Log.md` — plain-language changelog shown in-app (the "Last updated" stamp at the bottom of the page opens it in a modal, fetched live). No technical details — just what changed from a user's perspective, newest entry first.
+- `Dev_Log.md` — technical log for us: bugs hit, lessons learned, tooling notes, compile errors. Never shown in-app. As of 2026-08-18 it's a living document (`## Lessons & gotchas` / `## Current state` / `## Not yet done`), not an append-only chronicle — edit those sections in place rather than appending dated entries.
+- `User_Log.md` — plain-language changelog shown in-app (the "Last updated" stamp at the bottom of the page reads live off this file's newest entry — see `updateStamp()` in `index.html`). No technical details — just what changed from a user's perspective, newest entry first.
+
+**Where does a given fact belong — here or in `Dev_Log.md`?** Two different jobs, so don't duplicate the same fact in both:
+- **This file (`CLAUDE.md`)** is loaded every session regardless of topic — it only holds what's relevant *every* time: current operational facts (active board, FQBN, COM port) and standing rules (workflow, tone, communication preferences). Test: "would getting this wrong misdirect any session, regardless of what we're working on?"
+- **`Dev_Log.md`** is read on demand — it holds what's only useful when specifically debugging or deciding something similar later: the *why* behind a fact, history of what was tried and reverted, reusable techniques. Test: "is this only useful in the specific context of understanding a past decision or diagnosing a similar future bug?"
+
+If a fact is already stated in full here, it doesn't need restating in `Dev_Log.md` — only add the reasoning/context this file doesn't carry.
 
 ## Standing workflow rule (updated 2026-08-08)
 1. **Batch work before rebuilding.** Multiple features/mockups can be worked on locally without rebuilding after each one — don't rebuild reflexively after every small change.
