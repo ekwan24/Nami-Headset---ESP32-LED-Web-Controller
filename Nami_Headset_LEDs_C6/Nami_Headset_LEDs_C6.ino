@@ -50,14 +50,14 @@ CRGB leds[NUM_LEDS];
 #define QA1_BRIGHTNESS_PCT       100   // overall brightness
 
 // ---- Default 2: Breathe ----
-#define QA2_MIN_BRIGHTNESS_PCT   5   // dimmest point of the breathing cycle
-#define QA2_MAX_BRIGHTNESS_PCT   35   // brightest point of the breathing cycle
-#define QA2_SPEED_TICK           0   // breathing speed
+#define QA2_MIN_BRIGHTNESS_PCT   15   // dimmest point of the breathing cycle
+#define QA2_MAX_BRIGHTNESS_PCT   100   // brightest point of the breathing cycle
+#define QA2_SPEED_TICK           -1   // breathing speed
 
 // ---- Default 3: Waves ----
 #define QA3_PEAK_BRIGHTNESS_PCT  100   // brightness at the head of each wave
 #define QA3_BASE_BRIGHTNESS_PCT  25   // brightness of the background glow
-#define QA3_SPEED_TICK            1   // wave travel speed
+#define QA3_SPEED_TICK            0   // wave travel speed
 #define QA3_TRAIL_LENGTH         20   // how many LEDs long the fading trail is (1-30)
 
 // ---- Default 3 (Waves) specific: Ring B rotation ----
@@ -79,9 +79,9 @@ CRGB leds[NUM_LEDS];
 #define RINGB_PHASE_OFFSET  27
 
 // ---- Default 4: Rainbow ----
-#define QA4_BRIGHTNESS_PCT        25   // overall brightness (uniform, no peak/base split)
-#define QA4_SPEED_TICK              0   // wheel/wave travel speed
-#define QA4_RAINBOW_SPEED_TICK      0   // independent hue-cycling speed
+#define QA4_BRIGHTNESS_PCT        100   // overall brightness (uniform, no peak/base split)
+#define QA4_SPEED_TICK              2   // wheel/wave travel speed
+#define QA4_RAINBOW_SPEED_TICK      2   // independent hue-cycling speed
 
 // Fine-tune WHERE Ring B's rainbow wheel sits relative to Ring A's, same
 // idea as RINGB_PHASE_OFFSET above but expressed as a hue offset (0-255)
@@ -249,17 +249,32 @@ void renderBreathe(uint16_t start, uint16_t count, const SegSettings &sg, float 
 void renderWavesStrip(const SegSettings &sg, uint16_t &head, uint8_t &tick) {
   uint8_t baseBr = (uint8_t)(sg.baseBright * waveBrightScale);
   fill_solid(leds + STRIP_START, STRIP_LEDS, segColor(sg, baseBr));
-  const uint8_t half = STRIP_LEDS / 2;
+  // Round up, not down: with an odd STRIP_LEDS, flooring this would leave
+  // the exact center LED uncovered by either front (e.g. 69 LEDs: floor(69/2)
+  // = 34 means the fronts only ever reach indices 33 and 35, skipping 34).
+  // Rounding up instead makes both fronts converge onto that shared center
+  // pixel right at the peak, before the wrap. No effect on even LED counts.
+  const uint8_t half = (STRIP_LEDS + 1) / 2;
   if (++tick >= sg.speedThr) {
     tick = 0;
     head += sg.speedStep;
     while (head >= half) head -= half;
   }
   uint8_t peakBr = (uint8_t)(sg.brightness * waveBrightScale);
-  for (uint8_t w = 0; w < sg.trail; w++) {
+  // Cap the trail at half the travel distance to the middle, regardless of
+  // the configured trail length. Each front only travels `half` LEDs before
+  // snapping back to the edge (see the wrap above) — if the trail were
+  // allowed to span that whole distance, it wouldn't finish fading to
+  // baseBr before the snap, so the reset would look like a visible chunk of
+  // still-lit trail disappearing instead of a clean Snake-style wrap.
+  // Capping it to half of that distance guarantees a fully-faded (i.e.
+  // invisible) gap before every reset.
+  uint8_t effTrail = min(sg.trail, (uint8_t)(half / 2));
+  if (effTrail < 1) effTrail = 1;
+  for (uint8_t w = 0; w < effTrail; w++) {
     int p = ((int)head - w + half) % half;
     // fade from peak (head) to base (tail)
-    int trailVal = peakBr - (w * (peakBr - baseBr) / sg.trail);
+    int trailVal = peakBr - (w * (peakBr - baseBr) / effTrail);
     leds[STRIP_START + p]                    = segColor(sg, (uint8_t)trailVal);
     leds[STRIP_START + (STRIP_LEDS - 1 - p)] = segColor(sg, (uint8_t)trailVal);
   }
@@ -301,7 +316,11 @@ void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uin
 // mapping over time so the gradient band travels end -> center -> loops.
 // Uniform brightness throughout, no fading trail/base.
 void renderRainbowStrip(uint16_t start, uint16_t count, const SegSettings &sg, uint8_t phase) {
-  uint16_t half = count / 2;
+  // Round up, not down — same reasoning as renderWavesStrip: with an odd
+  // count, flooring leaves the exact center LED uncovered by either half
+  // (e.g. 69 LEDs: floor(69/2) = 34 skips index 34 entirely). No effect on
+  // even counts.
+  uint16_t half = (count + 1) / 2;
   uint8_t  deltaHue = 255 / half;
   for (uint16_t p = 0; p < half; p++) {
     CHSV hsv((uint8_t)(phase - p * deltaHue), 255, sg.brightness);

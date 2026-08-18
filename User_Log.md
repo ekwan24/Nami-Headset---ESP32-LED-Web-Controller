@@ -4,6 +4,10 @@
 - Shortened the LED strip to match the trimmed headset — patterns now correctly cover just the LEDs that are actually there.
 - Fixed a wiring issue that left the strip and second ring dark after the strip was trimmed.
 - New default look: patterns now start in blue instead of teal, and brighter by default.
+- Fixed the Waves pattern on the strip so it fades away smoothly when the two sides meet in the middle, instead of visibly popping and restarting.
+- Fixed a dark LED right in the center of the strip that Waves and Rainbow weren't lighting up.
+- Base Brightness can now be turned down further (as low as 5%, was capped at 25%).
+- Breathe and Rainbow patterns are brighter and a bit faster by default.
 
 ## 2026-08-14
 - The headset firmware now also works on a new, smaller controller board (ESP32-C6) — no change for anyone using the existing setup.
