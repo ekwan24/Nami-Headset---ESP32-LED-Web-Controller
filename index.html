@@ -365,6 +365,34 @@ const QA_DEFAULTS = {
 function q(s)  { return document.querySelector(s); }
 function qa(s) { return document.querySelectorAll(s); }
 
+const QA_NAMES = ['Solid','Breathe','Waves','Rainbow'];
+
+// Shows the tuning panel for whichever pattern is now selected: the panel
+// title, which fields are relevant to it, and the divider between the
+// universal (color) and pattern-specific controls. Used both when the user
+// taps a pattern button (selectQA) and when the device's own running
+// pattern is learned on connect (applyState) — same UI update either way.
+function showPatternUI(idx) {
+  q('#tuningCard').classList.remove('disabled');
+  q('#tuningWho').textContent = QA_NAMES[idx];
+  qa('.field[data-qa]').forEach(f => {
+    const targets = f.dataset.qa.split(',').map(Number);
+    f.classList.toggle('hidden', !targets.includes(idx));
+  });
+  q('#patDivider').style.display = '';
+}
+
+// RSSI is optional (older firmware may not expose it), so a missing
+// characteristic here shouldn't break the rest of the connection — used by
+// both the initial connect and every reconnect attempt.
+async function subscribeRssi(service) {
+  try {
+    const rc = await service.getCharacteristic(RSSI);
+    await rc.startNotifications();
+    rc.addEventListener('characteristicvaluechanged', onRssi);
+  } catch(e) { console.log('RSSI not available'); }
+}
+
 // ── BLE SEND ───────────────────────────────────────────
 async function send(str) {
   if (!characteristic) return;
@@ -400,11 +428,7 @@ async function toggleConnect() {
     const server  = await device.gatt.connect();
     const service = await server.getPrimaryService(SVC);
     characteristic = await service.getCharacteristic(CHAR);
-    try {
-      const rc = await service.getCharacteristic(RSSI);
-      await rc.startNotifications();
-      rc.addEventListener('characteristicvaluechanged', onRssi);
-    } catch(e) { console.log('RSSI not available'); }
+    await subscribeRssi(service);
     // Read current state from ESP32 and sync UI. This is what makes the
     // Lights toggle and pattern buttons match reality on connect, so it's
     // worth one retry rather than silently leaving the UI on its default
@@ -449,13 +473,6 @@ async function syncStateFromDevice() {
 }
 
 // ── DISCONNECT HANDLING (auto-reconnect) ───────────────
-// OLD VERSION — kept for reference/rollback:
-// function onDisconnect() {
-//   characteristic = null;
-//   stateCharacteristic = null;
-//   setConnState('disconnected');
-// }
-
 function onDisconnect() {
   characteristic = null;
   stateCharacteristic = null;
@@ -500,11 +517,7 @@ async function attemptReconnect(retries = 5, delayMs = 1000, connectTimeoutMs = 
       if (reconnectAbort) { isReconnecting = false; return; }
       const service = await server.getPrimaryService(SVC);
       characteristic = await service.getCharacteristic(CHAR);
-      try {
-        const rc = await service.getCharacteristic(RSSI);
-        await rc.startNotifications();
-        rc.addEventListener('characteristicvaluechanged', onRssi);
-      } catch(e) { console.log('RSSI not available'); }
+      await subscribeRssi(service);
       stateCharacteristic = await service.getCharacteristic(STATE);
       await syncStateFromDevice();
       isReconnecting = false;
@@ -616,18 +629,7 @@ async function selectQA(idx, btn) {
   // re-apply universal color immediately
   send('QACOLOR:'+uniColor.replace('#',''));
 
-  // show the tuning panel
-  q('#tuningCard').classList.remove('disabled');
-  q('#tuningWho').textContent = ['Solid','Breathe','Waves','Rainbow'][idx];
-
-  // show/hide pattern-specific fields
-  qa('.field[data-qa]').forEach(f=>{
-    const targets = f.dataset.qa.split(',').map(Number);
-    f.classList.toggle('hidden', !targets.includes(idx));
-  });
-
-  // show divider — all three patterns now have at least one specific control
-  q('#patDivider').style.display = '';
+  showPatternUI(idx);
 
   // pull this pattern's actual current values (the .ino's #define defaults,
   // or whatever was tuned earlier this session) straight from the device
@@ -883,14 +885,7 @@ function applyState(stateStr) {
       activeQA   = idx;
       activeQAEl = btns[idx];
 
-      // show tuning panel and correct fields
-      q('#tuningCard').classList.remove('disabled');
-      q('#tuningWho').textContent = ['Solid','Breathe','Waves','Rainbow'][idx];
-      qa('.field[data-qa]').forEach(f => {
-        const targets = f.dataset.qa.split(',').map(Number);
-        f.classList.toggle('hidden', !targets.includes(idx));
-      });
-      q('#patDivider').style.display = '';
+      showPatternUI(idx);
 
       // apply synced values to sliders
       const br   = parseInt(s.BRIGHT) || 0;

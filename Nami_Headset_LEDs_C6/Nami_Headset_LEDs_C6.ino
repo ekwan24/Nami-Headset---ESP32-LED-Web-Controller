@@ -129,10 +129,9 @@ Preferences prefs;
 // ============================================================
 // HELPERS
 // ============================================================
-// percent (0-100) -> 0-255, with optional floor
-uint8_t pctTo255(uint8_t pct, uint8_t floor255) {
-  uint8_t v = (uint8_t)((pct / 100.0f) * 255);
-  return max(v, floor255);
+// percent (0-100) -> 0-255
+uint8_t pctTo255(uint8_t pct) {
+  return (uint8_t)((pct / 100.0f) * 255);
 }
 
 // apply speed tick (-5..+5) to a segment
@@ -171,27 +170,27 @@ Preset makeQA(uint8_t effectIdx) {
 
       case 0:  // Default 1 — Solid
         p.seg[i].pattern    = PAT_SOLID;
-        p.seg[i].brightness = pctTo255(QA1_BRIGHTNESS_PCT, 0);
+        p.seg[i].brightness = pctTo255(QA1_BRIGHTNESS_PCT);
         break;
 
       case 1:  // Default 2 — Breathe
         p.seg[i].pattern    = PAT_BREATHE;
-        p.seg[i].minBright  = pctTo255(QA2_MIN_BRIGHTNESS_PCT, 0);
-        p.seg[i].maxBright  = pctTo255(QA2_MAX_BRIGHTNESS_PCT, 0);
+        p.seg[i].minBright  = pctTo255(QA2_MIN_BRIGHTNESS_PCT);
+        p.seg[i].maxBright  = pctTo255(QA2_MAX_BRIGHTNESS_PCT);
         applySpeedTick(QA2_SPEED_TICK, p.seg[i]);
         break;
 
       case 2:  // Default 3 — Waves
         p.seg[i].pattern     = PAT_WAVES;
-        p.seg[i].brightness  = pctTo255(QA3_PEAK_BRIGHTNESS_PCT, 0);
-        p.seg[i].baseBright  = pctTo255(QA3_BASE_BRIGHTNESS_PCT, 0);
+        p.seg[i].brightness  = pctTo255(QA3_PEAK_BRIGHTNESS_PCT);
+        p.seg[i].baseBright  = pctTo255(QA3_BASE_BRIGHTNESS_PCT);
         applySpeedTick(QA3_SPEED_TICK, p.seg[i]);
         p.seg[i].trail       = QA3_TRAIL_LENGTH;
         break;
 
       case 3:  // Default 4 — Rainbow
         p.seg[i].pattern     = PAT_RAINBOW;
-        p.seg[i].brightness  = pctTo255(QA4_BRIGHTNESS_PCT, 0);
+        p.seg[i].brightness  = pctTo255(QA4_BRIGHTNESS_PCT);
         applySpeedTick(QA4_SPEED_TICK, p.seg[i]);
         applyHueTick(QA4_RAINBOW_SPEED_TICK, p.seg[i]);
         break;
@@ -466,20 +465,20 @@ class CmdCallback : public BLECharacteristicCallbacks {
 
     } else if (strcmp(cmd, "BRIGHT") == 0) {
       // peak/head brightness (Solid + Waves) — if base is now above peak, pull base down to match
-      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
       FOR_QA_SEGS( sg.brightness = val; if (sg.baseBright > val) sg.baseBright = val; )
 
     } else if (strcmp(cmd, "BASE") == 0) {
       // base brightness (Waves) — capped at current peak brightness, never brighter than peak
-      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
       FOR_QA_SEGS( sg.baseBright = min(val, sg.brightness); )
 
     } else if (strcmp(cmd, "MINBR") == 0) {
-      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
       FOR_QA_SEGS( sg.minBright = val; )
 
     } else if (strcmp(cmd, "MAXBR") == 0) {
-      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100), 0);
+      uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
       FOR_QA_SEGS( sg.maxBright = val; )
 
     } else if (strcmp(cmd, "SPD") == 0) {

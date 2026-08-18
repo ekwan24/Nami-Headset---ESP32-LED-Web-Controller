@@ -1,11 +1,12 @@
 # Nami Headset — Project Instructions
 
 ## What this is
-An ESP32-based LED headset (cosplay use). 228 WS2812B LEDs (RingA 54 / Strip 120 / RingB 54) controlled over BLE from a self-contained webpage (Web Bluetooth) hosted on GitHub Pages so it's reachable from a phone away from any local server.
+An ESP32-based LED headset (cosplay use). 176 WS2812B LEDs (RingA 54 / Strip 69 / RingB 54 — the strip was physically shortened from its original 120) controlled over BLE from a self-contained webpage (Web Bluetooth) hosted on GitHub Pages so it's reachable from a phone away from any local server.
 
 ## Key files
-- `Nami_Headset_LEDs/Nami_Headset_LEDs.ino` — firmware. Must live in a folder whose name matches the `.ino` filename exactly — the Arduino toolchain requires this to compile/upload.
-- `index.html` — the control webpage. Fully self-contained (no external CSS/JS dependencies), talks to the headset directly over Web Bluetooth.
+- `Nami_Headset_LEDs_C6/Nami_Headset_LEDs_C6.ino` — **active firmware**, for the Seeed XIAO ESP32-C6 board currently in the headset. Must live in a folder whose name matches the `.ino` filename exactly — the Arduino toolchain requires this to compile/upload.
+- `Nami_Headset_LEDs/Nami_Headset_LEDs.ino` — **archived** classic-ESP32 firmware (2026-08-18). That board has been retired; this file is kept for reference only and is no longer actively maintained/synced with the C6 build. Don't spend effort keeping it in parity with new features or tuning changes unless specifically asked.
+- `index.html` — the control webpage. Fully self-contained (no external CSS/JS dependencies), talks to the headset directly over Web Bluetooth. Board-agnostic — BLE UUIDs/protocol are the same for both firmwares.
 - `Dev_Log.md` — technical log for us: bugs hit, lessons learned, tooling notes, compile errors. Never shown in-app.
 - `User_Log.md` — plain-language changelog shown in-app (the "Last updated" stamp at the bottom of the page opens it in a modal, fetched live). No technical details — just what changed from a user's perspective, newest entry first.
 
@@ -24,14 +25,20 @@ An ESP32-based LED headset (cosplay use). 228 WS2812B LEDs (RingA 54 / Strip 120
 
 ## Firmware toolchain
 - `arduino-cli` at `C:\Program Files\Arduino CLI\arduino-cli.exe`, config at `%USERPROFILE%\.arduino15cli\arduino-cli.yaml` (points at the existing Arduino IDE data dir so it shares already-installed cores/libraries — don't reinstall ESP32 core or FastLED).
-- Board: **ESP32 Dev Module**, flash chip confirmed **4MB** (2026-08-08, via `esptool.exe flash_id`).
-- **FQBN: `esp32:esp32:esp32:PartitionScheme=min_spiffs`** — must include the `PartitionScheme=min_spiffs` option on every compile/upload. Without it, the build silently falls back to the "Default" partition table (smaller ~1.25MB app slots instead of ~1.9MB), which no longer matches what's actually flashed on the board and risks a boot/partition mismatch. This isn't optional — always include it.
-- Flash over USB via the Silicon Labs CP210x bridge, typically **COM7** — reconfirm with:
-  `Get-CimInstance -ClassName Win32_PnPEntity | Where-Object { $_.Name -match "COM\d+" }`
-- Compile: `arduino-cli --config-file <cfg> compile --fqbn "esp32:esp32:esp32:PartitionScheme=min_spiffs" Nami_Headset_LEDs`
-- Upload: same, `upload -p COM7 --fqbn "esp32:esp32:esp32:PartitionScheme=min_spiffs" Nami_Headset_LEDs`
+- Reconfirm the COM port each session rather than assuming — it can shift: `Get-CimInstance -ClassName Win32_PnPEntity | Where-Object { $_.Name -match "COM\d+" }`
 - **Known gotcha:** if the COM port disappears mid-upload, it's a physical USB connection drop (reseat the cable), not a firmware/tooling bug — confirmed this happened once and a reseat fixed it.
-- Storage usage as of 2026-08-08 (after switching to `min_spiffs`): **63%** of the 1.9MB app slot (was 95% of the old 1.25MB slot before the switch — same firmware, bigger slot, freed by reclaiming the unused `spiffs` partition). The partition table now also has two OTA-ready app slots, which matters if WiFi/OTA is ever added later.
+
+**Active board — ESP32-C6** (Seeed XIAO ESP32-C6, `Nami_Headset_LEDs_C6/Nami_Headset_LEDs_C6.ino`)
+- Board: **XIAO_ESP32C6**, 4MB flash, native USB CDC (no CP210x bridge) — enumerates as `USB Serial Device` (VID_303A), typically **COM8**.
+- **FQBN: `esp32:esp32:XIAO_ESP32C6:PartitionScheme=no_ota`**
+- Compile: `arduino-cli --config-file <cfg> compile --fqbn "esp32:esp32:XIAO_ESP32C6:PartitionScheme=no_ota" Nami_Headset_LEDs_C6`
+- Upload: same, `upload -p COM8 --fqbn "esp32:esp32:XIAO_ESP32C6:PartitionScheme=no_ota" Nami_Headset_LEDs_C6`
+- Storage usage as of 2026-08-18: **42%** of the 2MB app partition.
+
+**Archived board — classic ESP32** (`Nami_Headset_LEDs/Nami_Headset_LEDs.ino`) — retired 2026-08-18, kept for reference only
+- Board: **ESP32 Dev Module**, flash chip confirmed **4MB** (2026-08-08, via `esptool.exe flash_id`), Silicon Labs CP210x bridge, typically **COM7**.
+- FQBN: `esp32:esp32:esp32:PartitionScheme=min_spiffs` — must include `PartitionScheme=min_spiffs` if this board is ever brought back; omitting it silently reverts to a smaller, mismatched partition table.
+- Storage usage as of 2026-08-08: 63% of the 1.9MB app slot.
 
 ## Local webpage preview
 `.claude/launch.json` defines a `nami-webpage` server (`py -m http.server 5500`) for previewing the page in the Browser pane. Note this only lets you check UI/layout — Web Bluetooth won't actually pair with the real headset from a sandboxed/remote browser context, only from a real local Chrome (or Bluefy/WebBLE on iOS).
