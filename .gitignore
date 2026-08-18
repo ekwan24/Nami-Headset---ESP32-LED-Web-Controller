@@ -1,1 +1,5 @@
 .claude/settings.local.json
+
+# arduino-cli compile output (regenerated on every compile, never meant to be committed)
+build/
+builds/
