@@ -1,5 +1,8 @@
 # Nami Headset — Update Log
 
+## 2026-08-18
+- Fixed the "Last updated" date at the bottom of the page, which had been stuck showing an old date.
+
 ## 2026-08-17
 - Shortened the LED strip to match the trimmed headset — patterns now correctly cover just the LEDs that are actually there.
 - Fixed a wiring issue that left the strip and second ring dark after the strip was trimmed.
