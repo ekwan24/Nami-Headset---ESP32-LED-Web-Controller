@@ -32,10 +32,11 @@ $cfg = "$env:USERPROFILE\.arduino15cli\arduino-cli.yaml"
 Replace `<repo>` with the actual repo path. Check for exit code 0. In the output, find the line like `Sketch uses X bytes (Y%) of program storage space` — if Y is climbing toward 100, mention it to the user even if the compile succeeded; that's useful information before it becomes a blocker.
 
 **3. Upload.**
-Same command, swap `compile` for `upload -p COM<N>` (using the port from step 1):
+Same command, swap `compile` for `upload -p COM<N>` (using the port from step 1). esptool prints a `Writing at 0x... [====] X.X%...` line per chunk per partition (bootloader/partitions/boot_app0/app) — dozens of lines that are never actually read, just token cost. Filter them out; nothing that matters (connection info, hash verification, errors) is prefixed `Writing at`, so this doesn't hide failures:
 ```powershell
-& $cli --config-file $cfg upload -p COM<N> --fqbn "esp32:esp32:XIAO_ESP32C6:PartitionScheme=no_ota" "<repo>\Nami_Headset_LEDs_C6"
+& $cli --config-file $cfg upload -p COM<N> --fqbn "esp32:esp32:XIAO_ESP32C6:PartitionScheme=no_ota" "<repo>\Nami_Headset_LEDs_C6" | Where-Object { $_ -notmatch '^Writing at' }
 ```
+If using the Bash tool instead of PowerShell, the equivalent is piping through `grep -v '^Writing at'`. Still check for exit code 0 and the "Hash of data verified" lines as before — the filter only removes progress-percentage noise, not anything that indicates success or failure.
 
 **Known gotcha:** if the upload fails partway with the COM port *completely disappearing* from Windows (not just "port busy" — actually gone), that's a physical USB connection drop, not a firmware or tooling problem. Re-run the step 1 port scan:
 - If the port reappears, retry the upload — this has resolved the issue before.
