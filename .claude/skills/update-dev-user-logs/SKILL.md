@@ -38,6 +38,8 @@ Per this project's `CLAUDE.md` workflow rule, this skill should only run after t
 
 **3. Write the User_Log.md entry** (skip this file only if the change is genuinely invisible to a user). Translate the same change into what someone actually experiences: not "replaced String concatenation with fixed buffers" but "the app runs more reliably during long sessions." If in doubt about whether something counts as user-visible, default to including a simple version of it — a small, honest entry beats silently dropping something the user might notice.
 
+Nothing to do here for the "Last updated" footer stamp — as of 2026-08-18 it's read live from `User_Log.md`'s newest `## YYYY-MM-DD` entry (see `updateStamp()` in `index.html`) rather than being a hardcoded string, so it stays correct automatically whenever this step adds a new entry. No separate edit needed.
+
 **4. Also update the `## Current state` summary at the bottom of `Dev_Log.md`** if the change affects something that summary describes (new capability, changed architecture, newly-resolved "not yet done" item). Don't touch it for changes that don't shift the overall picture.
 
 **5. Stage, commit, and push.** Include the actual code/content files that changed alongside both logs in one commit — don't split the real change and its log entry into separate commits.

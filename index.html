@@ -315,7 +315,7 @@
 
 </div>
 
-<div class="stamp" onclick="openLog()" role="button" tabindex="0" title="View update log">Last updated: 2026-08-17 22:45 UTC</div>
+<div class="stamp" id="stampText" onclick="openLog()" role="button" tabindex="0" title="View update log">Last updated: loading…</div>
 
 <div class="modal-overlay" id="logOverlay" onclick="if(event.target===this) closeLog()">
   <div class="modal">
@@ -926,7 +926,20 @@ function applyState(stateStr) {
 // full markdown library would be overkill for a one-file changelog viewer.
 // (The technical build log with dev-only notes lives separately in
 // Dev_Log.md and is never shown in-app — this one is user-facing.)
+//
+// The fetched text is also the source of the "Last updated" stamp (see
+// updateStamp() below) — its date always matches the log's newest entry
+// instead of being a separate hardcoded string that has to be remembered
+// and kept in sync by hand every time the log changes.
 let logLoaded = false;
+let userLogText = null;
+async function fetchUserLog() {
+  if (userLogText !== null) return userLogText;
+  const res = await fetch('User_Log.md', { cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  userLogText = await res.text();
+  return userLogText;
+}
 function openLog() {
   q('#logOverlay').classList.add('open');
   if (!logLoaded) loadLog();
@@ -937,14 +950,27 @@ function closeLog() {
 async function loadLog() {
   const body = q('#logBody');
   try {
-    const res = await fetch('User_Log.md', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    body.innerHTML = renderMarkdown(await res.text());
+    body.innerHTML = renderMarkdown(await fetchUserLog());
     logLoaded = true;
   } catch (e) {
     body.innerHTML = '<p style="color:var(--danger)">Could not load the update log ('
       + escapeHtml(e.message)
       + '). Make sure User_Log.md is served alongside this page.</p>';
+  }
+}
+// Sets the footer stamp from the log's newest "## YYYY-MM-DD" entry. Left
+// showing "loading…" (then whatever it last managed to fetch) rather than a
+// hardcoded fallback date if this fails — a stale-but-plausible date would
+// be more misleading than an honest "couldn't load" state.
+async function updateStamp() {
+  const el = q('#stampText');
+  try {
+    const text = await fetchUserLog();
+    const m = text.match(/^##\s*(\d{4}-\d{2}-\d{2})/m);
+    el.textContent = 'Last updated: ' + (m ? m[1] : 'unknown');
+  } catch (e) {
+    el.textContent = 'Last updated: unavailable';
+    console.log('Stamp date fetch failed:', e);
   }
 }
 function escapeHtml(s) {
@@ -982,6 +1008,7 @@ paint();
 updateSquareVisual();
 paintSwatches();
 updateColorBar();
+updateStamp();
 </script>
 </body>
 </html>
