@@ -1,5 +1,10 @@
 # Nami Headset — Update Log
 
+## 2026-08-17
+- Shortened the LED strip to match the trimmed headset — patterns now correctly cover just the LEDs that are actually there.
+- Fixed a wiring issue that left the strip and second ring dark after the strip was trimmed.
+- New default look: patterns now start in blue instead of teal, and brighter by default.
+
 ## 2026-08-14
 - The headset firmware now also works on a new, smaller controller board (ESP32-C6) — no change for anyone using the existing setup.
 
