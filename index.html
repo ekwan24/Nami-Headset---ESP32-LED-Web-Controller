@@ -301,7 +301,7 @@
   <!-- Default 3 (Waves): Base Brightness (renamed from Base Glow) -->
   <div class="field hidden" data-qa="2" id="fBase">
     <label>Base Brightness <span class="val" id="vBase">15%</span></label>
-    <input type="range" min="25" max="100" value="15"
+    <input type="range" min="5" max="100" value="15"
            oninput="onPct('BASE','vBase',this.value)"
            onchange="sendNow('BASE',this.value)">
   </div>
@@ -356,9 +356,9 @@ let uniColor  = '#006eff';
 // firmware's current #define values and should not be relied on.
 const QA_DEFAULTS = {
   0: { solidbr:100 },                          // Solid: brightness
-  1: { minbr:5, maxbr:35, spd:0 },             // Breathe
-  2: { wavemaster:100, wavebr:100, base:25, spd:1, trail:20 }, // Waves
-  3: { solidbr:25, spd:0, rainbowspd:0 }                      // Rainbow
+  1: { minbr:15, maxbr:100, spd:-1 },          // Breathe
+  2: { wavemaster:100, wavebr:100, base:25, spd:0, trail:20 }, // Waves
+  3: { solidbr:100, spd:2, rainbowspd:2 }                     // Rainbow
 };
 
 // ── HELPERS ────────────────────────────────────────────
