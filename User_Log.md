@@ -2,6 +2,9 @@
 
 ## 2026-08-18
 - Fixed the "Last updated" date at the bottom of the page, which had been stuck showing an old date.
+- Waves pattern now flows smoothly between LEDs instead of visibly stepping, especially noticeable at slower speeds.
+- Fixed a brief blink that showed up in both rings once per spin during Waves.
+- Dim colors (Waves' background glow, the low point of Breathe) now keep their color instead of washing out toward grey/black.
 
 ## 2026-08-17
 - Shortened the LED strip to match the trimmed headset — patterns now correctly cover just the LEDs that are actually there.
