@@ -46,6 +46,11 @@ If a fact is already stated in full here, it doesn't need restating in `Dev_Log.
 - FQBN: `esp32:esp32:esp32:PartitionScheme=min_spiffs` — must include `PartitionScheme=min_spiffs` if this board is ever brought back; omitting it silently reverts to a smaller, mismatched partition table.
 - Storage usage as of 2026-08-08: 63% of the 1.9MB app slot.
 
+## Efficiency practices (added 2026-08-18)
+- Prefer targeted `Grep`/partial `Read` (`offset`/`limit`) over reading whole files — `Dev_Log.md`, this file, and `index.html` will only grow, so a full read scales worse over time than a targeted lookup for the specific fact needed.
+- If a tool/command turns out to be verbose in a way nothing actually reads, filter it rather than accepting the noise (e.g. esptool's per-chunk upload progress lines, filtered in the `rebuild-and-flash` skill) — apply the same treatment to any future tooling that behaves the same way.
+- Match verification frequency to actual risk — don't add a check after every sub-step by default. Each one has a real cost even when nothing's expected to have changed; a screenshot especially, since it embeds a full image rather than text.
+
 ## Local webpage preview
 `.claude/launch.json` defines a `nami-webpage` server (`py -m http.server 5500`) for previewing the page in the Browser pane. Note this only lets you check UI/layout — Web Bluetooth won't actually pair with the real headset from a sandboxed/remote browser context, only from a real local Chrome (or Bluefy/WebBLE on iOS).
 
