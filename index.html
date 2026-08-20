@@ -223,7 +223,7 @@
     <label>Color</label>
     <button type="button" class="color-bar" id="colorBar" onclick="togglePicker()">
       <span class="color-bar-swatch" id="colorBarSwatch"></span>
-      <span class="color-bar-hex" id="colorBarHex">#006EFF</span>
+      <span class="color-bar-hex" id="colorBarHex">#00A77D</span>
       <svg class="color-chevron" id="colorChevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="6 9 12 15 18 9"/>
       </svg>
@@ -346,7 +346,7 @@ let isReconnecting   = false;     // true while attemptReconnect() is actively r
 let reconnectAbort   = false;     // set true to stop an in-progress reconnect loop early
 
 // universal values (persist across QA switches)
-let uniColor  = '#006eff';
+let uniColor  = '#00a77d';
 
 // per-QA pattern-specific defaults (shown when switching to that QA)
 // Fallback only — used to populate the tuning panel if a live read from the
@@ -680,16 +680,21 @@ function paint() {
 }
 
 // ── UNIVERSAL TUNING: custom color picker ──────────────
-// 4 preset slots. Slot 0 is fixed to the firmware's default blue and can
+// 4 preset slots. Slot 0 is fixed to the firmware's default color and can
 // never be edited — it's always one tap back to the original look. Slots
-// 1-3 start as copies of that same blue but can be repainted by dragging
+// 1-3 start as copies of that same color but can be repainted by dragging
 // the hue+sat square / hue slider while that slot is selected. Whichever
 // slot is selected is what's currently live on the LEDs.
-const DEFAULT_HEX = '006EFF';
+// Must match QA_COLOR_R/G/B in the firmware's .ino — keep these in sync by hand
+// whenever that default changes.
+const DEFAULT_HEX = '00A77D';
 let slotColors = [DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX];
 let slotFilled = [true, false, false, false];   // slot 0 always "filled" (it's the fixed default); 1-3 start empty
 let activeSlot  = 0;    // -1 = a synced device color didn't match any saved slot
-let curHue = 214, curSat = 1.0, curVal = 1.0;   // HSV backing the square + slider
+// Derived from DEFAULT_HEX (via hexToHsv, defined below — hoisted, so callable here)
+// rather than hardcoded, so this can't drift out of sync with DEFAULT_HEX again.
+const _defaultHsv = hexToHsv(DEFAULT_HEX);
+let curHue = _defaultHsv.h, curSat = _defaultHsv.s, curVal = _defaultHsv.v;   // HSV backing the square + slider
 let pickerOpen = false;
 
 function togglePicker() {
