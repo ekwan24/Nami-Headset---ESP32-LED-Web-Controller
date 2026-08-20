@@ -21,7 +21,7 @@
 #define COLOR_ORDER  GRB
 
 #define RINGA_LEDS   54
-#define STRIP_LEDS   69
+#define STRIP_LEDS   68
 #define RINGB_LEDS   54
 #define NUM_LEDS     (RINGA_LEDS + STRIP_LEDS + RINGB_LEDS)  // 176
 #define RINGA_START  0
@@ -29,6 +29,7 @@
 #define RINGB_START  (RINGA_LEDS + STRIP_LEDS)
 
 CRGB leds[NUM_LEDS];
+CRGB ledsPrev[NUM_LEDS];  // scratch buffer: holds the outgoing pattern's live render during a crossfade
 
 // ============================================================
 // DEFAULT TUNING VALUES
@@ -43,11 +44,11 @@ CRGB leds[NUM_LEDS];
 
 // Shared color for all 3 Quick Access effects (hex RGB)
 #define QA_COLOR_R  0x00
-#define QA_COLOR_G  0x6E
-#define QA_COLOR_B  0xFF
+#define QA_COLOR_G  0xA7
+#define QA_COLOR_B  0x7D
 
 // ---- Default 1: Solid ----
-#define QA1_BRIGHTNESS_PCT       100   // overall brightness
+#define QA1_BRIGHTNESS_PCT       65   // overall brightness
 
 // ---- Default 2: Breathe ----
 #define QA2_MIN_BRIGHTNESS_PCT   15   // dimmest point of the breathing cycle
@@ -56,9 +57,9 @@ CRGB leds[NUM_LEDS];
 
 // ---- Default 3: Waves ----
 #define QA3_PEAK_BRIGHTNESS_PCT  100   // brightness at the head of each wave
-#define QA3_BASE_BRIGHTNESS_PCT  25   // brightness of the background glow
+#define QA3_BASE_BRIGHTNESS_PCT  12   // brightness of the background glow
 #define QA3_SPEED_TICK            0   // wave travel speed
-#define QA3_TRAIL_LENGTH         20   // how many LEDs long the fading trail is (1-30)
+#define QA3_TRAIL_LENGTH         30   // how many LEDs long the fading trail is (1-30)
 
 // ---- Default 3 (Waves) specific: Ring B rotation ----
 // Set to 1 if Ring B should travel the OPPOSITE index direction from Ring A
@@ -88,6 +89,15 @@ CRGB leds[NUM_LEDS];
 // since Rainbow doesn't have discrete LED "positions" the way Waves does.
 // Flash with 0 first, watch alignment, then nudge and reflash.
 #define RAINBOW_RINGB_HUE_OFFSET  0
+
+// ---- Pattern-switch crossfade ----
+// How long a smooth dissolve takes when switching between Solid/Breathe/Waves
+// via a Quick Access tap (milliseconds). Both the outgoing and incoming
+// patterns render live and get pixel-blended for this long. Rainbow switches
+// are always instant — its position+hue math isn't meant to be blended
+// against, and dissolving into/out of a full-spectrum wheel didn't look good.
+#define TRANSITION_MS  400
+
 #define PAT_SOLID   0
 #define PAT_BREATHE 1
 #define PAT_WAVES   2
@@ -123,6 +133,10 @@ struct Preset {
 // ============================================================
 uint8_t runQA      = 0;    // 0-2 which quick access effect is running
 bool    ledsOn     = true;
+
+bool     transitioning    = false;   // true while crossfading between two Quick Access patterns
+uint8_t  fromQA            = 0;      // pattern being faded OUT of (only meaningful while transitioning)
+uint32_t transitionStartMs = 0;
 
 Preferences prefs;
 
@@ -244,8 +258,8 @@ CRGB segColor(const SegSettings &sg, uint8_t bright255) {
 }
 
 // Solid: fill the segment range with solid color
-void renderSolid(uint16_t start, uint16_t count, const SegSettings &sg) {
-  fill_solid(leds + start, count, segColor(sg, sg.brightness));
+void renderSolid(uint16_t start, uint16_t count, const SegSettings &sg, CRGB *buf) {
+  fill_solid(buf + start, count, segColor(sg, sg.brightness));
 }
 
 // Breathe: brightness eases between minBright and maxBright.
@@ -259,24 +273,24 @@ void renderSolid(uint16_t start, uint16_t count, const SegSettings &sg) {
 //     climbs slowly out of the dark and only accelerates near the top —
 //     matching how the eye actually perceives the change.
 #define BREATHE_GAMMA 1.8f
-void renderBreathe(uint16_t start, uint16_t count, const SegSettings &sg, float phase) {
+void renderBreathe(uint16_t start, uint16_t count, const SegSettings &sg, float phase, CRGB *buf) {
   float t      = (sinf(phase) + 1.0f) * 0.5f;      // 0..1 raw sine
   float eased  = t * t * (3.0f - 2.0f * t);         // smoothstep
   float shaped = powf(eased, BREATHE_GAMMA);        // perceptual gamma correction
   uint8_t lo = sg.minBright;
   uint8_t hi = sg.maxBright;
   uint8_t br = lo + (uint8_t)(shaped * (hi - lo));
-  fill_solid(leds + start, count, segColor(sg, br));
+  fill_solid(buf + start, count, segColor(sg, br));
 }
 
 // Waves on strip: two fronts from ends, continuous wrapping trail.
 // `dt` (seconds since last frame) drives a continuously-accumulated
 // fractional head position instead of hopping a whole LED every speedThr
 // frames — see the comment on renderWavesRing below for why.
-void renderWavesStrip(const SegSettings &sg, float dt) {
+void renderWavesStrip(const SegSettings &sg, float dt, CRGB *buf) {
   static float headF = 0.0f;
   uint8_t baseBr = (uint8_t)(sg.baseBright * waveBrightScale);
-  fill_solid(leds + STRIP_START, STRIP_LEDS, segColor(sg, baseBr));
+  fill_solid(buf + STRIP_START, STRIP_LEDS, segColor(sg, baseBr));
   // Round up, not down: with an odd STRIP_LEDS, flooring this would leave
   // the exact center LED uncovered by either front (e.g. 69 LEDs: floor(69/2)
   // = 34 means the fronts only ever reach indices 33 and 35, skipping 34).
@@ -307,8 +321,8 @@ void renderWavesStrip(const SegSettings &sg, float dt) {
     float dist = fabsf(headF - (headIdx - w));   // continuous distance from head, in LEDs
     if (dist > effTrail) continue;
     uint8_t trailVal = (uint8_t)(peakBr - dist * (peakBr - baseBr) / effTrail);
-    leds[STRIP_START + p]                    = segColor(sg, trailVal);
-    leds[STRIP_START + (STRIP_LEDS - 1 - p)] = segColor(sg, trailVal);
+    buf[STRIP_START + p]                    = segColor(sg, trailVal);
+    buf[STRIP_START + (STRIP_LEDS - 1 - p)] = segColor(sg, trailVal);
   }
 }
 
@@ -325,9 +339,9 @@ void renderWavesStrip(const SegSettings &sg, float dt) {
 // position — as posF drifts between two integer pixels, brightness eases
 // from one to the other frame by frame, so the same average speed now looks
 // like a smooth glide instead of a jump.
-void renderWavesRing(uint16_t start, uint8_t count, const SegSettings &sg, float posF, bool reverse) {
+void renderWavesRing(uint16_t start, uint8_t count, const SegSettings &sg, float posF, bool reverse, CRGB *buf) {
   uint8_t baseBr = (uint8_t)(sg.baseBright * waveBrightScale);
-  fill_solid(leds + start, count, segColor(sg, baseBr));
+  fill_solid(buf + start, count, segColor(sg, baseBr));
   uint8_t peakBr = (uint8_t)(sg.brightness * waveBrightScale);
   int headIdx = (int)floorf(posF);
   int dirSign = reverse ? -1 : 1;
@@ -347,7 +361,7 @@ void renderWavesRing(uint16_t start, uint8_t count, const SegSettings &sg, float
     float dist = fabsf(dirSign * (posF - rawIdx));   // continuous distance from head, in LEDs
     if (dist > sg.trail) continue;
     uint8_t trailVal = (uint8_t)(peakBr - dist * (peakBr - baseBr) / sg.trail);
-    leds[start + idx] = segColor(sg, trailVal);
+    buf[start + idx] = segColor(sg, trailVal);
   }
 }
 
@@ -355,13 +369,13 @@ void renderWavesRing(uint16_t start, uint8_t count, const SegSettings &sg, float
 // entire ring, all pixels at the same brightness. `startHue` is the
 // rotating phase (Speed + Rainbow Speed combined upstream). `reverseDir`
 // mirrors the wheel for Ring B, same idea as renderWavesRing's `reverse`.
-void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uint8_t startHue) {
+void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uint8_t startHue, CRGB *buf) {
   uint8_t deltaHue = 255 / count;
   for (uint8_t i = 0; i < count; i++) {
     CHSV hsv(startHue + i * deltaHue, 255, sg.brightness);
     CRGB c;
     hsv2rgb_rainbow(hsv, c);
-    leds[start + i] = c;
+    buf[start + i] = c;
   }
 }
 
@@ -371,7 +385,7 @@ void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uin
 // midpoint; `phase` (Speed + Rainbow Speed combined upstream) shifts that
 // mapping over time so the gradient band travels end -> center -> loops.
 // Uniform brightness throughout, no fading trail/base.
-void renderRainbowStrip(uint16_t start, uint16_t count, const SegSettings &sg, uint8_t phase) {
+void renderRainbowStrip(uint16_t start, uint16_t count, const SegSettings &sg, uint8_t phase, CRGB *buf) {
   // Round up, not down — same reasoning as renderWavesStrip: with an odd
   // count, flooring leaves the exact center LED uncovered by either half
   // (e.g. 69 LEDs: floor(69/2) = 34 skips index 34 entirely). No effect on
@@ -382,8 +396,8 @@ void renderRainbowStrip(uint16_t start, uint16_t count, const SegSettings &sg, u
     CHSV hsv((uint8_t)(phase - p * deltaHue), 255, sg.brightness);
     CRGB c;
     hsv2rgb_rainbow(hsv, c);
-    leds[start + p]                = c;
-    leds[start + (count - 1 - p)]  = c;
+    buf[start + p]                = c;
+    buf[start + (count - 1 - p)]  = c;
   }
 }
 
@@ -552,17 +566,27 @@ class CmdCallback : public BLECharacteristicCallbacks {
       FOR_QA_SEGS( applyHueTick(tick, sg); )
 
     } else if (strcmp(cmd, "QA") == 0) {
-      // run a quick access effect
-      runQA = constrain((int)atol(arg), 0, 3);
-      saveRunningState();
+      // run a quick access effect. If neither the outgoing nor incoming
+      // pattern is Rainbow, crossfade smoothly between them (see loop());
+      // Rainbow always switches instantly (see TRANSITION_MS above).
+      uint8_t newQA = constrain((int)atol(arg), 0, 3);
+      if (newQA != runQA) {
+        if (runQA != PAT_RAINBOW && newQA != PAT_RAINBOW) {
+          fromQA = runQA;
+          transitionStartMs = millis();
+          transitioning = true;
+        } else {
+          transitioning = false;
+        }
+        runQA = newQA;
+        saveRunningState();
+      }
 
     } else if (strcmp(cmd, "ON") == 0) {
       ledsOn = true;
-      prefs.putBool("ledsOn", true);
 
     } else if (strcmp(cmd, "OFF") == 0) {
       ledsOn = false;
-      prefs.putBool("ledsOn", false);
 
     } else if (strcmp(cmd, "WAVEBRIGHT") == 0) {
       // master brightness for Waves pattern only — scales base + trail/peak proportionally
@@ -618,9 +642,11 @@ void setup() {
   // Flash
   prefs.begin("ledapp", false);
 
-  // Restore last running state
+  // Restore last running state. On/off intentionally does NOT persist —
+  // every power-up starts with the LEDs on, regardless of how they were
+  // left before the last power loss.
   loadRunningState();
-  ledsOn = prefs.getBool("ledsOn", true);
+  ledsOn = true;
 
   // Build Quick Access effects (hardcoded signature looks)
   QA[0] = makeQA(0);    // Default 1: Solid
@@ -682,24 +708,108 @@ static float    breathePhase[3] = {0.0f, 0.0f, 0.0f};  // one per segment (RingA
 static uint32_t lastFrameMs = 0;
 
 // Rainbow pattern phase state — rings (A & B share one wheel position/hue,
-// same idea as ringPos/ringTick above) and strip each get their own
-// position phase (driven by Speed) and hue phase (driven by Rainbow Speed);
-// the two are combined additively at render time.
-static uint8_t rbRingPos = 0, rbRingPosTick = 0;
+// same idea as ringPosF above) and strip each get their own position phase
+// (driven by Speed) and hue phase (driven by Rainbow Speed); the two are
+// combined additively at render time. Position now accumulates continuously
+// via dt (rbRingPosF/rbStripPosF), the same technique as Waves' ringPosF, so
+// rotation speed is smooth and frame-rate independent instead of hopping a
+// whole hue step only once every speedThr frames. Hue-cycling (Rainbow
+// Speed) stays on the old discrete tick cadence — it's a color-cycle-in-place
+// control, not physical rotation, so there's no Waves equivalent to match it to.
+static float   rbRingPosF = 0.0f;
 static uint8_t rbRingHue = 0, rbRingHueTick = 0;
-static uint8_t rbStripPos = 0, rbStripPosTick = 0;
+static float   rbStripPosF = 0.0f;
 static uint8_t rbStripHue = 0, rbStripHueTick = 0;
 
 // Render one segment's Solid or Breathe pattern (Waves is handled separately
 // per-segment-type in loop(), since ring waves and strip waves use different
 // rendering logic). `phase` is that segment's persistent breathe-cycle state.
-void renderSegment(uint16_t start, uint16_t count, const SegSettings &sg, float &phase, float dt) {
+void renderSegment(uint16_t start, uint16_t count, const SegSettings &sg, float &phase, float dt, CRGB *buf) {
   if (sg.pattern == PAT_SOLID) {
-    renderSolid(start, count, sg);
+    renderSolid(start, count, sg, buf);
   } else if (sg.pattern == PAT_BREATHE) {
     float rate = sg.speedStep / (float)sg.speedThr;   // cycles/sec (0.5 at neutral speed)
     phase = fmodf(phase + 2.0f * M_PI * rate * dt, 2.0f * M_PI);
-    renderBreathe(start, count, sg, phase);
+    renderBreathe(start, count, sg, phase, buf);
+  }
+}
+
+// Render one full preset (Ring A + Strip + Ring B) into the given buffer,
+// advancing whichever pattern-specific animation state it needs along the
+// way. Called once per frame normally; called twice during a crossfade (the
+// outgoing preset into ledsPrev, the incoming one into leds — see loop()),
+// which is safe because the outgoing and incoming presets are always
+// different pattern types (each QA slot has a fixed, unique pattern), so
+// they never both touch the same static animation-state variable in the
+// same frame.
+void renderPreset(const Preset &p, float dt, CRGB *buf) {
+  const SegSettings &sgA = p.seg[0];   // Ring A
+  const SegSettings &sgS = p.seg[1];   // Strip
+  const SegSettings &sgB = p.seg[2];   // Ring B
+
+  // ---- RING A ----
+  if (sgA.pattern == PAT_WAVES) {
+    // advance shared ring position (Ring A drives it, Ring B follows the same position, in sync)
+    ringPosF += ledsPerSecond(sgA) * dt;
+    ringPosF = fmodf(ringPosF, (float)RINGA_LEDS);
+    if (ringPosF < 0.0f) ringPosF += RINGA_LEDS;
+    renderWavesRing(RINGA_START, RINGA_LEDS, sgA, ringPosF, false, buf);
+  } else if (sgA.pattern == PAT_RAINBOW) {
+    // advance shared wheel position (Ring A drives it, Ring B follows, mirrored) continuously
+    // by dt, same as ringPosF for Waves — smooth motion instead of a per-tick hop. 256 stands
+    // in for "LEDs" in ledsPerSecond()'s math since the wheel position is a hue unit (0-255),
+    // not an LED index.
+    rbRingPosF = fmodf(rbRingPosF + ledsPerSecond(sgA) * dt, 256.0f);
+    if (rbRingPosF < 0.0f) rbRingPosF += 256.0f;
+    if (++rbRingHueTick >= sgA.hueThr)   { rbRingHueTick = 0; rbRingHue += sgA.hueStep; }
+    // Negated, not added: renderRainbowRing bakes hue as startHue + i*deltaHue, so a rising
+    // startHue actually shifts the visible band toward decreasing index — the opposite sense
+    // from Waves, where a rising ringPosF moves the head toward increasing index. Negating the
+    // combined position+hue sum (rather than just position) flips that to match Waves' absolute
+    // direction while still letting position and hue-cycling add constructively — negating only
+    // one term made them cancel to a constant whenever Speed and Rainbow Speed shared the same
+    // tick (e.g. both default to 2), which is what froze the rings entirely.
+    renderRainbowRing(RINGA_START, RINGA_LEDS, sgA, (uint8_t)(-((int)rbRingHue + (int)rbRingPosF)), buf);
+  } else {
+    renderSegment(RINGA_START, RINGA_LEDS, sgA, breathePhase[0], dt, buf);
+  }
+
+  // ---- STRIP ----
+  if (sgS.pattern == PAT_WAVES) {
+    renderWavesStrip(sgS, dt, buf);
+  } else if (sgS.pattern == PAT_RAINBOW) {
+    // same continuous-position technique as Ring A's rainbow above
+    rbStripPosF = fmodf(rbStripPosF + ledsPerSecond(sgS) * dt, 256.0f);
+    if (rbStripPosF < 0.0f) rbStripPosF += 256.0f;
+    if (++rbStripHueTick >= sgS.hueThr)   { rbStripHueTick = 0; rbStripHue += sgS.hueStep; }
+    renderRainbowStrip(STRIP_START, STRIP_LEDS, sgS, (uint8_t)((int)rbStripPosF + rbStripHue), buf);
+  } else {
+    renderSegment(STRIP_START, STRIP_LEDS, sgS, breathePhase[1], dt, buf);
+  }
+
+  // ---- RING B (moves in sync with Ring A) ----
+  if (sgB.pattern == PAT_WAVES) {
+#if RINGB_MIRROR_ROTATION
+    float ringPosBF = fmodf((float)RINGB_LEDS - ringPosF + RINGB_PHASE_OFFSET, (float)RINGB_LEDS);
+    if (ringPosBF < 0.0f) ringPosBF += RINGB_LEDS;
+    renderWavesRing(RINGB_START, RINGB_LEDS, sgB, ringPosBF, true, buf);   // reversed: head is moving the opposite index direction, so trail must too
+#else
+    float ringPosBF = fmodf(ringPosF + RINGB_PHASE_OFFSET, (float)RINGB_LEDS);
+    if (ringPosBF < 0.0f) ringPosBF += RINGB_LEDS;
+    renderWavesRing(RINGB_START, RINGB_LEDS, sgB, ringPosBF, false, buf);
+#endif
+  } else if (sgB.pattern == PAT_RAINBOW) {
+    uint8_t hueA = (uint8_t)(-((int)rbRingHue + (int)rbRingPosF));   // same expression as Ring A's render call above
+#if RINGB_MIRROR_ROTATION
+    // mirrored mount: wheel runs the opposite hue direction, offset for alignment
+    uint8_t hueB = (uint8_t)(255 - hueA + RAINBOW_RINGB_HUE_OFFSET);
+    renderRainbowRing(RINGB_START, RINGB_LEDS, sgB, hueB, buf);
+#else
+    uint8_t hueB = (uint8_t)(hueA + RAINBOW_RINGB_HUE_OFFSET);
+    renderRainbowRing(RINGB_START, RINGB_LEDS, sgB, hueB, buf);
+#endif
+  } else {
+    renderSegment(RINGB_START, RINGB_LEDS, sgB, breathePhase[2], dt, buf);
   }
 }
 
@@ -744,60 +854,25 @@ void loop() {
   offFrameSent = false;
 
   Preset *p = runningPreset();
-  const SegSettings &sgA = p->seg[0];   // Ring A
-  const SegSettings &sgS = p->seg[1];   // Strip
-  const SegSettings &sgB = p->seg[2];   // Ring B
 
-  // ---- RING A ----
-  if (sgA.pattern == PAT_WAVES) {
-    // advance shared ring position (Ring A drives it, Ring B follows the same position, in sync)
-    ringPosF += ledsPerSecond(sgA) * dt;
-    ringPosF = fmodf(ringPosF, (float)RINGA_LEDS);
-    if (ringPosF < 0.0f) ringPosF += RINGA_LEDS;
-    renderWavesRing(RINGA_START, RINGA_LEDS, sgA, ringPosF, false);
-  } else if (sgA.pattern == PAT_RAINBOW) {
-    // advance shared wheel position/hue phase (Ring A drives it, Ring B follows, mirrored)
-    if (++rbRingPosTick >= sgA.speedThr) { rbRingPosTick = 0; rbRingPos += sgA.speedStep; }
-    if (++rbRingHueTick >= sgA.hueThr)   { rbRingHueTick = 0; rbRingHue += sgA.hueStep; }
-    renderRainbowRing(RINGA_START, RINGA_LEDS, sgA, (uint8_t)(rbRingPos + rbRingHue));
+  if (transitioning) {
+    uint32_t transElapsedMs = frameStartMs - transitionStartMs;
+    if (transElapsedMs >= TRANSITION_MS) {
+      transitioning = false;
+      renderPreset(*p, dt, leds);
+    } else {
+      // Both patterns render live (with their own animation state advancing)
+      // every frame of the transition, into separate buffers, then get
+      // pixel-blended — a true crossfade rather than a fade-through-black.
+      renderPreset(QA[fromQA], dt, ledsPrev);   // outgoing pattern
+      renderPreset(*p, dt, leds);               // incoming pattern
+      uint8_t amt = (uint8_t)((transElapsedMs * 255UL) / TRANSITION_MS);   // 0=fully outgoing, 255=fully incoming
+      for (int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = blend(ledsPrev[i], leds[i], amt);
+      }
+    }
   } else {
-    renderSegment(RINGA_START, RINGA_LEDS, sgA, breathePhase[0], dt);
-  }
-
-  // ---- STRIP ----
-  if (sgS.pattern == PAT_WAVES) {
-    renderWavesStrip(sgS, dt);
-  } else if (sgS.pattern == PAT_RAINBOW) {
-    if (++rbStripPosTick >= sgS.speedThr) { rbStripPosTick = 0; rbStripPos += sgS.speedStep; }
-    if (++rbStripHueTick >= sgS.hueThr)   { rbStripHueTick = 0; rbStripHue += sgS.hueStep; }
-    renderRainbowStrip(STRIP_START, STRIP_LEDS, sgS, (uint8_t)(rbStripPos + rbStripHue));
-  } else {
-    renderSegment(STRIP_START, STRIP_LEDS, sgS, breathePhase[1], dt);
-  }
-
-  // ---- RING B (now moves in sync with Ring A) ----
-  if (sgB.pattern == PAT_WAVES) {
-#if RINGB_MIRROR_ROTATION
-    float ringPosBF = fmodf((float)RINGB_LEDS - ringPosF + RINGB_PHASE_OFFSET, (float)RINGB_LEDS);
-    if (ringPosBF < 0.0f) ringPosBF += RINGB_LEDS;
-    renderWavesRing(RINGB_START, RINGB_LEDS, sgB, ringPosBF, true);   // reversed: head is moving the opposite index direction, so trail must too
-#else
-    float ringPosBF = fmodf(ringPosF + RINGB_PHASE_OFFSET, (float)RINGB_LEDS);
-    if (ringPosBF < 0.0f) ringPosBF += RINGB_LEDS;
-    renderWavesRing(RINGB_START, RINGB_LEDS, sgB, ringPosBF, false);
-#endif
-  } else if (sgB.pattern == PAT_RAINBOW) {
-    uint8_t hueA = (uint8_t)(rbRingPos + rbRingHue);
-#if RINGB_MIRROR_ROTATION
-    // mirrored mount: wheel runs the opposite hue direction, offset for alignment
-    uint8_t hueB = (uint8_t)(255 - hueA + RAINBOW_RINGB_HUE_OFFSET);
-    renderRainbowRing(RINGB_START, RINGB_LEDS, sgB, hueB);
-#else
-    uint8_t hueB = (uint8_t)(hueA + RAINBOW_RINGB_HUE_OFFSET);
-    renderRainbowRing(RINGB_START, RINGB_LEDS, sgB, hueB);
-#endif
-  } else {
-    renderSegment(RINGB_START, RINGB_LEDS, sgB, breathePhase[2], dt);
+    renderPreset(*p, dt, leds);
   }
 
   FastLED.show();

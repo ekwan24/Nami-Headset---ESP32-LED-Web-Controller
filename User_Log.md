@@ -1,5 +1,13 @@
 # Nami Headset — Update Log
 
+## 2026-08-19
+- New default color: patterns now start in a teal/green instead of blue.
+- Solid and Waves' background glow are a bit dimmer/softer by default; Waves' trail is longer.
+- Switching between Solid, Breathe, and Waves now fades smoothly from one to the other instead of cutting instantly.
+- Rainbow now spins smoothly (no more visible stepping) and consistently in the same direction as Waves.
+- The headset no longer remembers whether it was left off — every time it's powered on, the lights turn on.
+- The webpage's color picker default now always matches the headset's actual default color.
+
 ## 2026-08-18
 - Fixed the "Last updated" date at the bottom of the page, which had been stuck showing an old date.
 - Waves pattern now flows smoothly between LEDs instead of visibly stepping, especially noticeable at slower speeds.

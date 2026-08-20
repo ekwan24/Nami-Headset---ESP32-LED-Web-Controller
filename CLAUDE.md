@@ -1,7 +1,7 @@
 # Nami Headset — Project Instructions
 
 ## What this is
-An ESP32-based LED headset (cosplay use). 176 WS2812B LEDs (RingA 54 / Strip 69 / RingB 54 — the strip was physically shortened from its original 120) controlled over BLE from a self-contained webpage (Web Bluetooth) hosted on GitHub Pages so it's reachable from a phone away from any local server.
+An ESP32-based LED headset (cosplay use). 175 WS2812B LEDs (RingA 54 / Strip 68 / RingB 54 — the strip was physically shortened from its original 120) controlled over BLE from a self-contained webpage (Web Bluetooth) hosted on GitHub Pages so it's reachable from a phone away from any local server.
 
 ## Key files
 - `Nami_Headset_LEDs_C6/Nami_Headset_LEDs_C6.ino` — **active firmware**, for the Seeed XIAO ESP32-C6 board currently in the headset. Must live in a folder whose name matches the `.ino` filename exactly — the Arduino toolchain requires this to compile/upload.
