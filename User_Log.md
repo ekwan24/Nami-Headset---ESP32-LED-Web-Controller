@@ -7,6 +7,7 @@
 - Rainbow now spins smoothly (no more visible stepping) and consistently in the same direction as Waves.
 - The headset no longer remembers whether it was left off — every time it's powered on, the lights turn on.
 - The webpage's color picker default now always matches the headset's actual default color.
+- Fixed a stray blinking LED right where the strip meets the second ring during Waves.
 
 ## 2026-08-18
 - Fixed the "Last updated" date at the bottom of the page, which had been stuck showing an old date.

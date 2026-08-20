@@ -21,9 +21,9 @@
 #define COLOR_ORDER  GRB
 
 #define RINGA_LEDS   54
-#define STRIP_LEDS   68
+#define STRIP_LEDS   66
 #define RINGB_LEDS   54
-#define NUM_LEDS     (RINGA_LEDS + STRIP_LEDS + RINGB_LEDS)  // 176
+#define NUM_LEDS     (RINGA_LEDS + STRIP_LEDS + RINGB_LEDS)  // 174
 #define RINGA_START  0
 #define STRIP_START  RINGA_LEDS
 #define RINGB_START  (RINGA_LEDS + STRIP_LEDS)
@@ -69,14 +69,6 @@ CRGB ledsPrev[NUM_LEDS];  // scratch buffer: holds the outgoing pattern's live r
 // Set to 0 to make Ring B use the exact same raw position as Ring A.
 #define RINGB_MIRROR_ROTATION 1
 
-// Fine-tune WHERE Ring B's bright head sits relative to Ring A's at any
-// given moment (rotation direction is already handled above — this is only
-// about starting alignment). This exists because each ring's LED index 0
-// may not be soldered/mounted at the same physical clock position, so the
-// mirrored math alone can't guarantee the two heads line up visually.
-// Range 0-53. Flash with 0 first, watch where the two heads sit relative to
-// each other, then nudge this up (try steps of ~5-10) and reflash until the
-// heads visually line up the way you want.
 #define RINGB_PHASE_OFFSET  0
 
 // ---- Default 4: Rainbow ----
