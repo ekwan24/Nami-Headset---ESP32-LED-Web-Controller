@@ -1,5 +1,11 @@
 # Nami Headset — Update Log
 
+## 2026-08-21
+- Fixed the Breathe pattern potentially glitching if Min Brightness was dragged above Max Brightness.
+- Fixed the Speed and Rainbow Speed sliders sometimes showing 0% after switching patterns or reconnecting, even when a different speed was actually still running.
+- Fixed the brightness sliders (Peak/Base on Waves, Min/Max on Breathe) sometimes showing a value that no longer matched what was actually running, right after dragging one past the other.
+- Fixed a visible color jump on the Rainbow pattern's rings where the color wheel wrapped back around to its starting point.
+
 ## 2026-08-20
 - Unplugging and replugging power now acts as a full reset: the headset always comes back on the Waves pattern with its default look, instead of remembering whatever was running before.
 
