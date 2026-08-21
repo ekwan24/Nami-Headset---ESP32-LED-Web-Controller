@@ -257,14 +257,14 @@
     <label>Min Brightness <span class="val" id="vMinBr">10%</span></label>
     <input type="range" min="0" max="100" value="10"
            oninput="onPct('MINBR','vMinBr',this.value)"
-           onchange="sendNow('MINBR',this.value)">
+           onchange="sendNowAndResync('MINBR',this.value)">
   </div>
 
   <div class="field hidden" data-qa="1" id="fMaxBr">
     <label>Max Brightness <span class="val" id="vMaxBr">30%</span></label>
     <input type="range" min="0" max="100" value="30"
            oninput="onPct('MAXBR','vMaxBr',this.value)"
-           onchange="sendNow('MAXBR',this.value)">
+           onchange="sendNowAndResync('MAXBR',this.value)">
   </div>
 
   <!-- Default 3 (Waves) specific: Master Brightness (scales base + trail proportionally) -->
@@ -280,7 +280,7 @@
     <label>Peak Brightness <span class="val" id="vWaveBr">25%</span></label>
     <input type="range" min="0" max="100" value="25"
            oninput="onPct('BRIGHT','vWaveBr',this.value)"
-           onchange="sendNow('BRIGHT',this.value)">
+           onchange="sendNowAndResync('BRIGHT',this.value)">
   </div>
 
   <!-- Default 2 + 3 + 4 (Breathe + Waves + Rainbow) -->
@@ -302,7 +302,7 @@
     <label>Base Brightness <span class="val" id="vBase">15%</span></label>
     <input type="range" min="5" max="100" value="15"
            oninput="onPct('BASE','vBase',this.value)"
-           onchange="sendNow('BASE',this.value)">
+           onchange="sendNowAndResync('BASE',this.value)">
   </div>
 
   <div class="field hidden" data-qa="2" id="fTrail">
@@ -403,6 +403,17 @@ let pending={}, debTimer=null;
 function qSend(cmd,val){ pending[cmd]=val; if(!debTimer) debTimer=setTimeout(flush,40); }
 function flush(){ for(const c in pending) send(c+':'+pending[c]); pending={}; debTimer=null; }
 function sendNow(cmd,val){ pending[cmd]=val; flush(); }
+
+// BRIGHT/BASE (Waves) and MINBR/MAXBR (Breathe) are mutually clamped in
+// firmware — dragging one past the other's current value gets silently
+// capped on the device. Re-pull state after these specific commands so both
+// sliders in the pair always reflect what's actually running, not just
+// whatever was last dragged.
+async function sendNowAndResync(cmd, val) {
+  await send(cmd + ':' + val);
+  try { await syncStateFromDevice(); }
+  catch(e) { console.log('Resync after ' + cmd + ' failed:', e); }
+}
 
 // ── CONNECTION ─────────────────────────────────────────
 async function toggleConnect() {

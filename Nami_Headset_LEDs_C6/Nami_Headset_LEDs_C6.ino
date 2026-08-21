@@ -359,9 +359,17 @@ void renderWavesRing(uint16_t start, uint8_t count, const SegSettings &sg, float
 // rotating phase (Speed + Rainbow Speed combined upstream). `reverseDir`
 // mirrors the wheel for Ring B, same idea as renderWavesRing's `reverse`.
 void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uint8_t startHue, CRGB *buf) {
-  uint8_t deltaHue = 255 / count;
+  // Divide fresh for every LED (i*256/count) instead of precomputing one
+  // truncated per-step delta and multiplying it. 54 doesn't divide evenly
+  // into the hue range, so a single rounded-down delta (255/54 -> 4) falls
+  // short of a full lap by the time it's repeated across all 54 LEDs (216
+  // instead of 256) — that whole shortfall lands in one place, a hard seam
+  // where the last LED meets the first. Recomputing per-LED keeps each
+  // one's rounding error under a single step, so the wrap-around gap is
+  // barely bigger than any other step instead of accumulating into a jump.
   for (uint8_t i = 0; i < count; i++) {
-    CHSV hsv(startHue + i * deltaHue, 255, sg.brightness);
+    uint8_t hue = startHue + (uint8_t)((i * 256) / count);
+    CHSV hsv(hue, 255, sg.brightness);
     CRGB c;
     hsv2rgb_rainbow(hsv, c);
     buf[start + i] = c;
@@ -428,15 +436,20 @@ uint8_t to_pct(uint8_t val) {
   return (uint8_t)(val / 255.0f * 100 + 0.5f);
 }
 
-// Reverse-engineer speed tick (-5..+5) from speedThr/speedStep
+// Reverse-engineer speed tick (-5..+5) from speedThr/speedStep. speedThr==1
+// is the marker for a positive tick (applySpeedTick always sets speedThr=1
+// there and speedStep=tick) — checking speedStep>1 instead used to miss
+// tick==+1 (speedStep=1 there too), which collided with tick==0's encoding
+// and read back as 0.
 int8_t getSpeedTick(const SegSettings &sg) {
-  if (sg.speedStep > 1) return sg.speedStep;          // positive tick
+  if (sg.speedThr == 1) return sg.speedStep;          // positive tick
   return -((int)(sg.speedThr - 2) / 2);               // zero or negative tick
 }
 
-// Reverse-engineer rainbow hue-cycle tick (-5..+5) from hueThr/hueStep
+// Reverse-engineer rainbow hue-cycle tick (-5..+5) from hueThr/hueStep — same
+// fix as getSpeedTick above, same reason.
 int8_t getHueTick(const SegSettings &sg) {
-  if (sg.hueStep > 1) return sg.hueStep;
+  if (sg.hueThr == 1) return sg.hueStep;
   return -((int)(sg.hueThr - 2) / 2);
 }
 
@@ -523,12 +536,16 @@ class CmdCallback : public BLECharacteristicCallbacks {
       FOR_QA_SEGS( sg.baseBright = min(val, sg.brightness); )
 
     } else if (strcmp(cmd, "MINBR") == 0) {
+      // capped at current max brightness, same pairing as BASE/BRIGHT above —
+      // Breathe's brightness formula subtracts min from max, so ever letting
+      // min exceed max sends that subtraction negative and corrupts the ramp
       uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
-      FOR_QA_SEGS( sg.minBright = val; )
+      FOR_QA_SEGS( sg.minBright = min(val, sg.maxBright); )
 
     } else if (strcmp(cmd, "MAXBR") == 0) {
+      // if min is now above the new max, pull min down to match
       uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
-      FOR_QA_SEGS( sg.maxBright = val; )
+      FOR_QA_SEGS( sg.maxBright = val; if (sg.minBright > val) sg.minBright = val; )
 
     } else if (strcmp(cmd, "SPD") == 0) {
       int tick = constrain((int)atol(arg), -5, 5);
