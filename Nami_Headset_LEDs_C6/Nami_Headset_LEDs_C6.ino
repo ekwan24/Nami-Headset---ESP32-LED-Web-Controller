@@ -3,7 +3,6 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <Preferences.h>
 #include <math.h>
 #include <string.h>
 
@@ -129,8 +128,6 @@ bool    ledsOn     = true;
 bool     transitioning    = false;   // true while crossfading between two Quick Access patterns
 uint8_t  fromQA            = 0;      // pattern being faded OUT of (only meaningful while transitioning)
 uint32_t transitionStartMs = 0;
-
-Preferences prefs;
 
 // ============================================================
 // HELPERS
@@ -394,17 +391,6 @@ void renderRainbowStrip(uint16_t start, uint16_t count, const SegSettings &sg, u
 }
 
 // ============================================================
-// FLASH STORAGE
-// ============================================================
-void saveRunningState() {
-  prefs.putUChar("runQA", runQA);
-}
-
-void loadRunningState() {
-  runQA = prefs.getUChar("runQA", 0);
-}
-
-// ============================================================
 // BLE
 // ============================================================
 #define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
@@ -571,7 +557,6 @@ class CmdCallback : public BLECharacteristicCallbacks {
           transitioning = false;
         }
         runQA = newQA;
-        saveRunningState();
       }
 
     } else if (strcmp(cmd, "ON") == 0) {
@@ -631,13 +616,12 @@ void setup() {
   fill_solid(leds, NUM_LEDS, CRGB::Black);
   FastLED.show();
 
-  // Flash
-  prefs.begin("ledapp", false);
-
-  // Restore last running state. On/off intentionally does NOT persist —
-  // every power-up starts with the LEDs on, regardless of how they were
-  // left before the last power loss.
-  loadRunningState();
+  // Every power cycle boots into Waves at its firmware defaults — nothing
+  // is persisted across power loss (there's no physical reset button, so
+  // unplug/replug is the reset gesture; QA[] gets rebuilt fresh from the
+  // DEFAULT TUNING VALUES block below regardless of any live tuning that
+  // was in place before power was lost).
+  runQA  = PAT_WAVES;
   ledsOn = true;
 
   // Build Quick Access effects (hardcoded signature looks)

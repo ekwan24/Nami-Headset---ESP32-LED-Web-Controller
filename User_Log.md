@@ -1,5 +1,8 @@
 # Nami Headset — Update Log
 
+## 2026-08-20
+- Unplugging and replugging power now acts as a full reset: the headset always comes back on the Waves pattern with its default look, instead of remembering whatever was running before.
+
 ## 2026-08-19
 - New default color: patterns now start in a teal/green instead of blue.
 - Solid and Waves' background glow are a bit dimmer/softer by default; Waves' trail is longer.
