@@ -406,9 +406,14 @@ async function sendNowAndResync(cmd, val) {
 // ── CONNECTION ─────────────────────────────────────────
 async function toggleConnect() {
   if (isReconnecting) {
-    // user wants to stop the auto-reconnect retries and go fully disconnected
+    // user wants to stop the auto-reconnect retries and go fully disconnected.
+    // manualDisconnect must be set before disconnect() — if a reconnect attempt
+    // had just succeeded and was mid-setup, this disconnect() fires
+    // gattserverdisconnected, and without this flag onDisconnect() wouldn't
+    // recognize it as intentional and would start a brand new reconnect loop.
     reconnectAbort = true;
     isReconnecting = false;
+    manualDisconnect = true;
     try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch(_) {}
     setConnState('disconnected');
     return;
@@ -427,11 +432,14 @@ async function toggleConnect() {
     const service = await server.getPrimaryService(SVC);
     characteristic = await service.getCharacteristic(CHAR);
     await subscribeRssi(service);
-    // Sync UI to the device's real state; retry once in case of a transient hiccup
-    try {
-      stateCharacteristic = await service.getCharacteristic(STATE);
-      await syncStateFromDevice();
-    } catch(e) { console.log('State sync failed:', e); }
+    // Sync UI to the device's real state. Required, not best-effort — a
+    // silent failure here used to leave the UI showing a stale pattern/lights
+    // state from a previous session with no indication anything was wrong
+    // (worst case right after the headset power-cycled, since it always
+    // boots to Waves). Letting this throw sends it to the catch below, which
+    // treats a failed sync the same as a failed connection.
+    stateCharacteristic = await service.getCharacteristic(STATE);
+    await syncStateFromDevice();
     setConnState('connected');
     manualDisconnect = false;
     startPing();
@@ -441,6 +449,8 @@ async function toggleConnect() {
     else if (msg.includes('busy'))    showErr('Device busy');
     else if (msg.includes('found'))   showErr('No device found');
     else                              showErr('Connect failed');
+    manualDisconnect = true;   // suppress auto-reconnect after a failed connection attempt
+    try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch(_) {}
     setConnState('disconnected');
   }
 }
