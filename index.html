@@ -347,12 +347,8 @@ let reconnectAbort   = false;     // set true to stop an in-progress reconnect l
 // universal values (persist across QA switches)
 let uniColor  = '#00a77d';
 
-// per-QA pattern-specific defaults (shown when switching to that QA)
-// Fallback only — used to populate the tuning panel if a live read from the
-// device fails right after switching patterns. The real values always come
-// from the firmware (see the DEFAULT TUNING VALUES block in the .ino) via
-// syncStateFromDevice(); these numbers are not guaranteed to match the
-// firmware's current #define values and should not be relied on.
+// Fallback values only, used if a live device read fails after switching
+// patterns — not guaranteed to match the firmware's actual current values.
 const QA_DEFAULTS = {
   0: { solidbr:100 },                          // Solid: brightness
   1: { minbr:15, maxbr:100, spd:-1 },          // Breathe
@@ -366,11 +362,8 @@ function qa(s) { return document.querySelectorAll(s); }
 
 const QA_NAMES = ['Solid','Breathe','Waves','Rainbow'];
 
-// Shows the tuning panel for whichever pattern is now selected: the panel
-// title, which fields are relevant to it, and the divider between the
-// universal (color) and pattern-specific controls. Used both when the user
-// taps a pattern button (selectQA) and when the device's own running
-// pattern is learned on connect (applyState) — same UI update either way.
+// Shows the tuning panel for the selected pattern: title, relevant fields,
+// and the universal/pattern-specific divider.
 function showPatternUI(idx) {
   q('#tuningCard').classList.remove('disabled');
   q('#tuningWho').textContent = QA_NAMES[idx];
@@ -381,9 +374,7 @@ function showPatternUI(idx) {
   q('#patDivider').style.display = '';
 }
 
-// RSSI is optional (older firmware may not expose it), so a missing
-// characteristic here shouldn't break the rest of the connection — used by
-// both the initial connect and every reconnect attempt.
+// RSSI is optional — a missing characteristic shouldn't break the connection.
 async function subscribeRssi(service) {
   try {
     const rc = await service.getCharacteristic(RSSI);
@@ -404,11 +395,8 @@ function qSend(cmd,val){ pending[cmd]=val; if(!debTimer) debTimer=setTimeout(flu
 function flush(){ for(const c in pending) send(c+':'+pending[c]); pending={}; debTimer=null; }
 function sendNow(cmd,val){ pending[cmd]=val; flush(); }
 
-// BRIGHT/BASE (Waves) and MINBR/MAXBR (Breathe) are mutually clamped in
-// firmware — dragging one past the other's current value gets silently
-// capped on the device. Re-pull state after these specific commands so both
-// sliders in the pair always reflect what's actually running, not just
-// whatever was last dragged.
+// BRIGHT/BASE and MINBR/MAXBR are mutually clamped in firmware, so resync
+// after these commands in case the device capped the value we sent.
 async function sendNowAndResync(cmd, val) {
   await send(cmd + ':' + val);
   try { await syncStateFromDevice(); }
@@ -439,10 +427,7 @@ async function toggleConnect() {
     const service = await server.getPrimaryService(SVC);
     characteristic = await service.getCharacteristic(CHAR);
     await subscribeRssi(service);
-    // Read current state from ESP32 and sync UI. This is what makes the
-    // Lights toggle and pattern buttons match reality on connect, so it's
-    // worth one retry rather than silently leaving the UI on its default
-    // (On / no pattern) if the first read hits a transient BLE hiccup.
+    // Sync UI to the device's real state; retry once in case of a transient hiccup
     try {
       stateCharacteristic = await service.getCharacteristic(STATE);
       await syncStateFromDevice();
@@ -460,12 +445,8 @@ async function toggleConnect() {
   }
 }
 
-// Reads the STATE characteristic and applies it to the UI, retrying once
-// after a short delay if the first attempt fails (e.g. the peripheral
-// wasn't quite ready yet). This is the single source of truth for slider
-// values — it always reflects whatever the firmware is actually running,
-// including the #define defaults baked in at boot, so the sliders never
-// drift out of sync with the .ino.
+// Reads STATE and applies it to the UI — the single source of truth for
+// slider values, so they can't drift from what the firmware is running.
 async function syncStateFromDevice() {
   if (!stateCharacteristic) return;
   let stateStr;
@@ -497,16 +478,11 @@ function onDisconnect() {
   }
 
   if (isReconnecting) {
-    // already inside a reconnect loop — a mid-attempt failure just
-    // triggered its own disconnect event. Let the existing loop keep
-    // retrying instead of starting a second, overlapping one (this was
-    // the cause of the connect/disconnect/reconnect flapping).
+    // already retrying — don't start a second overlapping reconnect loop
     return;
   }
 
-  // unexpected drop (out of range, ESP32 powered off, interference) — try
-  // to silently reconnect using the cached device reference before giving
-  // up and showing "Disconnected". No device picker, no user action needed.
+  // unexpected drop — try to silently reconnect before showing "Disconnected"
   attemptReconnect();
 }
 
@@ -517,9 +493,7 @@ async function attemptReconnect(retries = 5, delayMs = 1000, connectTimeoutMs = 
   for (let i = 0; i < retries; i++) {
     if (reconnectAbort) { isReconnecting = false; return; }  // user hit Cancel — state already set by toggleConnect
     try {
-      // gatt.connect() has no built-in short timeout — if the device is
-      // truly off/unreachable it can hang far longer than we want, so race
-      // it against our own clock and treat a timeout as a failed attempt.
+      // gatt.connect() has no built-in timeout, so race it against our own
       const server = await Promise.race([
         device.gatt.connect(),
         new Promise((_, rej) => setTimeout(() => rej(new Error('connect timeout')), connectTimeoutMs))
@@ -546,10 +520,8 @@ async function attemptReconnect(retries = 5, delayMs = 1000, connectTimeoutMs = 
   setConnState('disconnected');
 }
 
-// Periodic lightweight check: reads the STATE characteristic with a short
-// timeout. Some disconnects (e.g. the ESP32 losing power) don't fire the
-// browser's gattserverdisconnected event quickly, so this catches those
-// faster by forcing a real disconnect, which then triggers reconnect above.
+// Periodic STATE read to catch disconnects (e.g. power loss) that don't
+// fire the browser's gattserverdisconnected event promptly.
 let pingTimer = null;
 let pingFailCount = 0;
 const PING_FAIL_THRESHOLD = 2;  // require 2 consecutive misses before treating it as a real disconnect
@@ -690,19 +662,13 @@ function paint() {
 }
 
 // ── UNIVERSAL TUNING: custom color picker ──────────────
-// 4 preset slots. Slot 0 is fixed to the firmware's default color and can
-// never be edited — it's always one tap back to the original look. Slots
-// 1-3 start as copies of that same color but can be repainted by dragging
-// the hue+sat square / hue slider while that slot is selected. Whichever
-// slot is selected is what's currently live on the LEDs.
-// Must match QA_COLOR_R/G/B in the firmware's .ino — keep these in sync by hand
-// whenever that default changes.
+// 4 slots: slot 0 is fixed to the firmware's default color, slots 1-3 are
+// user-editable. Must match QA_COLOR_R/G/B in the .ino.
 const DEFAULT_HEX = '00A77D';
 let slotColors = [DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX, DEFAULT_HEX];
 let slotFilled = [true, false, false, false];   // slot 0 always "filled" (it's the fixed default); 1-3 start empty
 let activeSlot  = 0;    // -1 = a synced device color didn't match any saved slot
-// Derived from DEFAULT_HEX (via hexToHsv, defined below — hoisted, so callable here)
-// rather than hardcoded, so this can't drift out of sync with DEFAULT_HEX again.
+// Derived from DEFAULT_HEX rather than hardcoded, so it can't drift out of sync.
 const _defaultHsv = hexToHsv(DEFAULT_HEX);
 let curHue = _defaultHsv.h, curSat = _defaultHsv.s, curVal = _defaultHsv.v;   // HSV backing the square + slider
 let pickerOpen = false;
@@ -855,9 +821,8 @@ function onSlide(cmd, labelId, val) {
   qSend(cmd, val);
 }
 
-// ── STATE SYNC (called once on connect) ────────────────
-// Parses "QA:N,ON:0/1,COLOR:RRGGBB,BRIGHT:pct,..." from ESP32
-// and updates the entire UI to match what's actually running.
+// ── STATE SYNC ───────────────────────────────────────────
+// Parses "QA:N,ON:0/1,COLOR:RRGGBB,..." and updates the UI to match.
 function applyState(stateStr) {
   // parse "KEY:VAL,KEY:VAL,..." into an object
   const s = {};
@@ -874,9 +839,7 @@ function applyState(stateStr) {
     else          t.classList.add('off');
   }
 
-  // color — reflect the device's actual running color in the picker.
-  // If it matches one of our 4 saved slots, select that slot; otherwise
-  // just position the square/slider to it with no slot highlighted.
+  // reflect the device's running color — select a matching slot if one exists
   if (s.COLOR) {
     const hex = s.COLOR.toUpperCase();
     uniColor = '#' + hex;
@@ -935,17 +898,9 @@ function applyState(stateStr) {
 }
 
 // ── UPDATE LOG MODAL ─────────────────────────────────────
-// Fetches User_Log.md (served alongside this page) on first open and
-// renders it with a small hand-rolled markdown pass — the log only uses a
-// handful of constructs (#/##/### headers, -, **bold**, `code`, ---), so a
-// full markdown library would be overkill for a one-file changelog viewer.
-// (The technical build log with dev-only notes lives separately in
-// Dev_Log.md and is never shown in-app — this one is user-facing.)
-//
-// The fetched text is also the source of the "Last updated" stamp (see
-// updateStamp() below) — its date always matches the log's newest entry
-// instead of being a separate hardcoded string that has to be remembered
-// and kept in sync by hand every time the log changes.
+// Fetches User_Log.md and renders it with a small hand-rolled markdown pass
+// (only headers/-/bold/code/--- are used, so a full library is overkill).
+// Also the source of the "Last updated" stamp below, so it can't go stale.
 let logLoaded = false;
 let userLogText = null;
 async function fetchUserLog() {
@@ -973,10 +928,8 @@ async function loadLog() {
       + '). Make sure User_Log.md is served alongside this page.</p>';
   }
 }
-// Sets the footer stamp from the log's newest "## YYYY-MM-DD" entry. Left
-// showing "loading…" (then whatever it last managed to fetch) rather than a
-// hardcoded fallback date if this fails — a stale-but-plausible date would
-// be more misleading than an honest "couldn't load" state.
+// Sets the footer stamp from the log's newest date. Shows "unavailable" on
+// failure rather than a stale hardcoded fallback.
 async function updateStamp() {
   const el = q('#stampText');
   try {

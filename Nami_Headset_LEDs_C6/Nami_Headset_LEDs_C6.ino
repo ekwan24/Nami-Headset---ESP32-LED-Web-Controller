@@ -9,12 +9,8 @@
 // ============================================================
 // LED HARDWARE
 // ============================================================
-// GPIO5 (the pin used on the classic ESP32 build) is a JTAG pin on the
-// Seeed XIAO ESP32-C6 and unusable for general GPIO. D4-D10 carry default
-// silkscreen labels for I2C/UART/SPI (D10/GPIO18 = MOSI), but this sketch
-// never initializes those peripherals, so the pins are electrically free —
-// same reasoning already applied to D3/GPIO21 (nominally SPI SS) before this
-// pin was moved here. D10/GPIO18 isn't a JTAG or boot-strapping pin either.
+// GPIO18 (D10): free on this board. GPIO5 (used on the classic ESP32) is a
+// JTAG pin on the C6 and can't be used for general GPIO.
 #define LED_PIN      18
 #define LED_TYPE     WS2812B
 #define COLOR_ORDER  GRB
@@ -32,13 +28,8 @@ CRGB ledsPrev[NUM_LEDS];  // scratch buffer: holds the outgoing pattern's live r
 
 // ============================================================
 // DEFAULT TUNING VALUES
-// ------------------------------------------------------------
-// Edit the numbers below to change how each Quick Access effect
-// looks by default. Brightness values are plain percentages
-// (0-100) — no need to do any 0-255 math, that happens
-// automatically when the effects are built in makeQA().
-//
-// SPEED_TICK ranges from -5 (slowest) to +5 (fastest), 0 = neutral.
+// Brightness values are plain percentages (0-100). Speed ticks range
+// -5 (slowest) to +5 (fastest), 0 = neutral.
 // ============================================================
 
 // Shared color for all 3 Quick Access effects (hex RGB)
@@ -61,11 +52,8 @@ CRGB ledsPrev[NUM_LEDS];  // scratch buffer: holds the outgoing pattern's live r
 #define QA3_TRAIL_LENGTH         30   // how many LEDs long the fading trail is (1-30)
 
 // ---- Default 3 (Waves) specific: Ring B rotation ----
-// Set to 1 if Ring B should travel the OPPOSITE index direction from Ring A
-// (typical when B is physically mounted as a mirror image of A on the two
-// sides of a headset — like two linked/meshed gears, which always turn
-// opposite rotational directions but look synchronized where they meet).
-// Set to 0 to make Ring B use the exact same raw position as Ring A.
+// 1 = Ring B travels the opposite index direction from Ring A (mirrored
+// mount). 0 = same direction.
 #define RINGB_MIRROR_ROTATION 1
 
 #define RINGB_PHASE_OFFSET  0
@@ -75,18 +63,12 @@ CRGB ledsPrev[NUM_LEDS];  // scratch buffer: holds the outgoing pattern's live r
 #define QA4_SPEED_TICK              2   // wheel/wave travel speed
 #define QA4_RAINBOW_SPEED_TICK      2   // independent hue-cycling speed
 
-// Fine-tune WHERE Ring B's rainbow wheel sits relative to Ring A's, same
-// idea as RINGB_PHASE_OFFSET above but expressed as a hue offset (0-255)
-// since Rainbow doesn't have discrete LED "positions" the way Waves does.
-// Flash with 0 first, watch alignment, then nudge and reflash.
+// Hue offset (0-255) to align Ring B's rainbow wheel with Ring A's.
 #define RAINBOW_RINGB_HUE_OFFSET  0
 
 // ---- Pattern-switch crossfade ----
-// How long a smooth dissolve takes when switching between Solid/Breathe/Waves
-// via a Quick Access tap (milliseconds). Both the outgoing and incoming
-// patterns render live and get pixel-blended for this long. Rainbow switches
-// are always instant — its position+hue math isn't meant to be blended
-// against, and dissolving into/out of a full-spectrum wheel didn't look good.
+// Dissolve duration (ms) when switching between Solid/Breathe/Waves.
+// Rainbow always switches instantly instead of blending.
 #define TRANSITION_MS  400
 
 #define PAT_SOLID   0
@@ -132,13 +114,8 @@ uint32_t transitionStartMs = 0;
 // ============================================================
 // HELPERS
 // ============================================================
-// Target ms per animation frame. Defined early (rather than down by loop())
-// because renderWavesStrip() and ledsPerSecond() below need it to convert a
-// speed tick into a continuous LEDs-per-second rate. The trailing sleep in
-// loop() is trimmed by however long rendering + FastLED.show() already took
-// this frame, instead of always sleeping a flat interval regardless of
-// render cost — that kept the real frame period undefined, so animation
-// speed would drift if LED count or effect cost ever changed.
+// Target ms per animation frame. loop() trims its trailing delay by however
+// long rendering already took, so actual frame rate stays consistent.
 #define FRAME_INTERVAL_MS 20
 
 // percent (0-100) -> 0-255
@@ -146,35 +123,18 @@ uint8_t pctTo255(uint8_t pct) {
   return (uint8_t)((pct / 100.0f) * 255);
 }
 
-// apply speed tick (-5..+5) to a segment
-void applySpeedTick(int tick, SegSettings &sg) {
-  if (tick <= 0) {
-    sg.speedStep = 1;
-    sg.speedThr  = 2 + (-tick) * 2;
-  } else {
-    sg.speedThr  = 1;
-    sg.speedStep = tick;
-  }
+// apply a tick (-5..+5) to a threshold/step pair; higher tick = faster.
+// Shared by Speed (speedThr/speedStep) and Rainbow Speed (hueThr/hueStep).
+void applyTick(int tick, uint8_t &thr, uint8_t &step) {
+  if (tick <= 0) { step = 1; thr = 2 + (-tick) * 2; }
+  else           { thr = 1; step = tick; }
 }
+void applySpeedTick(int tick, SegSettings &sg) { applyTick(tick, sg.speedThr, sg.speedStep); }
+void applyHueTick(int tick, SegSettings &sg)   { applyTick(tick, sg.hueThr, sg.hueStep); }
 
-// apply rainbow hue-cycle tick (-5..+5) to a segment — same shape as
-// applySpeedTick but drives the independent hueThr/hueStep pair used by
-// the Rainbow pattern's "Rainbow Speed" control.
-void applyHueTick(int tick, SegSettings &sg) {
-  if (tick <= 0) {
-    sg.hueStep = 1;
-    sg.hueThr  = 2 + (-tick) * 2;
-  } else {
-    sg.hueThr  = 1;
-    sg.hueStep = tick;
-  }
-}
-
-// Convert a segment's speedStep/speedThr pair (the "every N frames, move M
-// pixels" cadence used elsewhere) into a continuous LEDs-per-second rate, so
-// Waves motion can be advanced smoothly every frame (accumulated * dt)
-// instead of jumping a whole LED only once every speedThr frames — the same
-// average speed, but rendered as motion instead of a stutter.
+// Converts speedStep/speedThr into a continuous LEDs-per-second rate, so
+// motion can be advanced smoothly every frame instead of hopping once every
+// speedThr frames.
 float ledsPerSecond(const SegSettings &sg) {
   return (sg.speedStep / (float)sg.speedThr) * (1000.0f / FRAME_INTERVAL_MS);
 }
@@ -224,22 +184,11 @@ Preset QA[4];          // filled in setup() — mutated live by tuning commands
 Preset QA_ORIGINAL[4]; // pristine copies of the firmware defaults, used by the RESET command
 float  waveBrightScale = 1.0f; // 0.0-1.0, master brightness for Waves pattern only (scales base + trail proportionally)
 
-// return pointer to the currently running Quick Access effect
-Preset* runningPreset() {
-  return &QA[runQA];
-}
-
 // ============================================================
 // RENDERING HELPERS
 // ============================================================
-// Scale a segment's color by a brightness level (0-255). Uses the
-// video-safe scale (nscale8_video) rather than plain nscale8: plain scaling
-// is a straight linear multiply that rounds any nonzero channel down to 0
-// once brightness gets low enough, which crushes dim regions (Waves' base
-// glow, Breathe's dark end, trail tails) to black and loses their hue
-// entirely. The video variant guarantees a nonzero channel stays at least 1
-// as long as both the channel and the scale are nonzero, so dim colors stay
-// visibly tinted instead of clipping to grey/black.
+// Scale a segment's color by brightness. nscale8_video (not nscale8) keeps
+// a nonzero channel from rounding down to black at low brightness.
 CRGB segColor(const SegSettings &sg, uint8_t bright255) {
   CRGB c = CRGB(sg.r, sg.g, sg.b);
   c.nscale8_video(bright255);
@@ -251,16 +200,10 @@ void renderSolid(uint16_t start, uint16_t count, const SegSettings &sg, CRGB *bu
   fill_solid(buf + start, count, segColor(sg, sg.brightness));
 }
 
-// Breathe: brightness eases between minBright and maxBright.
-// A raw sine wave, mapped linearly onto LED brightness, actually looks
-// "sharp" to the eye: human brightness perception is roughly logarithmic,
-// so equal linear steps look bigger and more sudden at the low end than
-// at the high end. Two things fix that:
-//  1. smoothstep() softens the sine's already-eased endpoints even more,
-//     removing any remaining sense of a "snap" at the top/bottom.
-//  2. a gamma curve (>1) compresses the low end of the ramp so brightness
-//     climbs slowly out of the dark and only accelerates near the top —
-//     matching how the eye actually perceives the change.
+// Breathe: brightness eases between minBright and maxBright. smoothstep()
+// softens the sine curve's ends, and a gamma curve (BREATHE_GAMMA) corrects
+// for perceived (roughly logarithmic) brightness so the ramp doesn't look
+// front-loaded.
 #define BREATHE_GAMMA 1.8f
 void renderBreathe(uint16_t start, uint16_t count, const SegSettings &sg, float phase, CRGB *buf) {
   float t      = (sinf(phase) + 1.0f) * 0.5f;      // 0..1 raw sine
@@ -272,39 +215,28 @@ void renderBreathe(uint16_t start, uint16_t count, const SegSettings &sg, float 
   fill_solid(buf + start, count, segColor(sg, br));
 }
 
-// Waves on strip: two fronts from ends, continuous wrapping trail.
-// `dt` (seconds since last frame) drives a continuously-accumulated
-// fractional head position instead of hopping a whole LED every speedThr
-// frames — see the comment on renderWavesRing below for why.
+// Waves on strip: two fronts travel from each end toward the center with a
+// continuous wrapping trail. `dt` drives a fractional head position for
+// smooth (not per-LED-stepped) motion.
 void renderWavesStrip(const SegSettings &sg, float dt, CRGB *buf) {
   static float headF = 0.0f;
   uint8_t baseBr = (uint8_t)(sg.baseBright * waveBrightScale);
   fill_solid(buf + STRIP_START, STRIP_LEDS, segColor(sg, baseBr));
-  // Round up, not down: with an odd STRIP_LEDS, flooring this would leave
-  // the exact center LED uncovered by either front (e.g. 69 LEDs: floor(69/2)
-  // = 34 means the fronts only ever reach indices 33 and 35, skipping 34).
-  // Rounding up instead makes both fronts converge onto that shared center
-  // pixel right at the peak, before the wrap. No effect on even LED counts.
+  // Round up so an odd STRIP_LEDS still gets its center LED covered by one
+  // of the two fronts (no effect on even counts).
   const uint8_t half = (STRIP_LEDS + 1) / 2;
   headF += ledsPerSecond(sg) * dt;
   headF = fmodf(headF, (float)half);
   if (headF < 0.0f) headF += half;
   uint8_t peakBr = (uint8_t)(sg.brightness * waveBrightScale);
-  // Cap the trail at half the travel distance to the middle, regardless of
-  // the configured trail length. Each front only travels `half` LEDs before
-  // snapping back to the edge (see the wrap above) — if the trail were
-  // allowed to span that whole distance, it wouldn't finish fading to
-  // baseBr before the snap, so the reset would look like a visible chunk of
-  // still-lit trail disappearing instead of a clean Snake-style wrap.
-  // Capping it to half of that distance guarantees a fully-faded (i.e.
-  // invisible) gap before every reset.
+  // Cap the trail to half the travel distance so it always fully fades out
+  // before the head wraps back to the edge — otherwise the wrap shows a
+  // visible chunk of still-lit trail disappearing.
   uint8_t effTrail = min(sg.trail, (uint8_t)(half / 2));
   if (effTrail < 1) effTrail = 1;
   int headIdx = (int)floorf(headF);
-  // w runs one step past the head (-1) so the not-yet-reached neighbor pixel
-  // gets a fractional glow too, instead of staying dark until the head hops
-  // onto it — that one extra sample is what turns the motion from a visible
-  // per-LED jump into a smooth glide.
+  // Start at -1 so the not-yet-reached neighbor pixel picks up a fractional
+  // glow, turning the motion into a smooth glide instead of a per-LED jump.
   for (int w = -1; w <= (int)effTrail; w++) {
     int p = ((headIdx - w) % half + half) % half;
     float dist = fabsf(headF - (headIdx - w));   // continuous distance from head, in LEDs
@@ -316,57 +248,33 @@ void renderWavesStrip(const SegSettings &sg, float dt, CRGB *buf) {
 }
 
 // Waves on ring: spinning dot with trail. `reverse` flips which side of the
-// head the trail is drawn on — needed when the head's position itself is
-// being driven in the opposite index direction (see RINGB_MIRROR_ROTATION),
-// otherwise the trail ends up on the wrong side of the head.
-//
-// `posF` is a continuous (fractional) position rather than a whole LED
-// index. Previously the head only ever sat on an integer pixel and hopped
-// to the next one once every speedThr frames, which reads as a visible
-// stutter, especially at slow speeds. Instead, each candidate pixel's
-// brightness is now computed from its exact distance to the continuous head
-// position — as posF drifts between two integer pixels, brightness eases
-// from one to the other frame by frame, so the same average speed now looks
-// like a smooth glide instead of a jump.
+// head the trail is drawn on (needed when Ring B runs the opposite index
+// direction — see RINGB_MIRROR_ROTATION). `posF` is a continuous fractional
+// position so motion glides smoothly instead of stepping per-LED.
 void renderWavesRing(uint16_t start, uint8_t count, const SegSettings &sg, float posF, bool reverse, CRGB *buf) {
   uint8_t baseBr = (uint8_t)(sg.baseBright * waveBrightScale);
   fill_solid(buf + start, count, segColor(sg, baseBr));
   uint8_t peakBr = (uint8_t)(sg.brightness * waveBrightScale);
   int headIdx = (int)floorf(posF);
   int dirSign = reverse ? -1 : 1;
-  // t runs one step before the head (-1) for the same reason as the strip
-  // version above: it lets the not-yet-reached neighbor pixel pick up a
-  // fractional glow instead of staying dark until the head lands on it.
   for (int t = -1; t <= (int)sg.trail; t++) {
-    // rawIdx is intentionally left unwrapped for the distance calc below —
-    // wrapping it into 0..count-1 first (as `idx` does, for array access)
-    // and then comparing against posF broke once per revolution: right as
-    // the head crosses from the last LED back to the first, the wrapped
-    // index and the still-continuous posF would differ by a full trip
-    // around the ring, so dist spiked to ~count and the trail dropped to
-    // base brightness for a frame — visible as a per-cycle blink.
+    // rawIdx must stay unwrapped for the distance calc — comparing a
+    // wrapped index against continuous posF caused a once-per-revolution
+    // blink right where the head crosses from the last LED back to the first.
     int rawIdx = headIdx - dirSign * t;
     int idx = ((rawIdx % count) + count) % count;
-    float dist = fabsf(dirSign * (posF - rawIdx));   // continuous distance from head, in LEDs
+    float dist = fabsf(dirSign * (posF - rawIdx));   // distance from head, in LEDs
     if (dist > sg.trail) continue;
     uint8_t trailVal = (uint8_t)(peakBr - dist * (peakBr - baseBr) / sg.trail);
     buf[start + idx] = segColor(sg, trailVal);
   }
 }
 
-// Rainbow ring: a smooth full-spectrum color wheel blended around the
-// entire ring, all pixels at the same brightness. `startHue` is the
-// rotating phase (Speed + Rainbow Speed combined upstream). `reverseDir`
-// mirrors the wheel for Ring B, same idea as renderWavesRing's `reverse`.
+// Rainbow ring: a full-spectrum color wheel around the ring, uniform
+// brightness. `startHue` is the rotating phase (Speed + Rainbow Speed).
 void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uint8_t startHue, CRGB *buf) {
-  // Divide fresh for every LED (i*256/count) instead of precomputing one
-  // truncated per-step delta and multiplying it. 54 doesn't divide evenly
-  // into the hue range, so a single rounded-down delta (255/54 -> 4) falls
-  // short of a full lap by the time it's repeated across all 54 LEDs (216
-  // instead of 256) — that whole shortfall lands in one place, a hard seam
-  // where the last LED meets the first. Recomputing per-LED keeps each
-  // one's rounding error under a single step, so the wrap-around gap is
-  // barely bigger than any other step instead of accumulating into a jump.
+  // i*256/count computed fresh per LED (not one truncated delta reused) so
+  // rounding error can't accumulate into a seam where the ring wraps.
   for (uint8_t i = 0; i < count; i++) {
     uint8_t hue = startHue + (uint8_t)((i * 256) / count);
     CHSV hsv(hue, 255, sg.brightness);
@@ -376,17 +284,10 @@ void renderRainbowRing(uint16_t start, uint8_t count, const SegSettings &sg, uin
   }
 }
 
-// Rainbow strip: a rainbow gradient that appears to flow in from both ends
-// toward the center and loop continuously. Hue at each half-strip pixel is
-// a function of its distance from the nearest end, mirrored across the
-// midpoint; `phase` (Speed + Rainbow Speed combined upstream) shifts that
-// mapping over time so the gradient band travels end -> center -> loops.
-// Uniform brightness throughout, no fading trail/base.
+// Rainbow strip: a gradient flows in from both ends toward the center and
+// loops continuously. `phase` shifts the mapping over time.
 void renderRainbowStrip(uint16_t start, uint16_t count, const SegSettings &sg, uint8_t phase, CRGB *buf) {
-  // Round up, not down — same reasoning as renderWavesStrip: with an odd
-  // count, flooring leaves the exact center LED uncovered by either half
-  // (e.g. 69 LEDs: floor(69/2) = 34 skips index 34 entirely). No effect on
-  // even counts.
+  // Round up so an odd count still covers its center LED (no effect on even).
   uint16_t half = (count + 1) / 2;
   uint8_t  deltaHue = 255 / half;
   for (uint16_t p = 0; p < half; p++) {
@@ -412,11 +313,8 @@ bool               clientConn = false;
 uint16_t           connHandle = 0;
 int8_t             lastRssi   = 0;
 
-// This board's BLE stack is NimBLE, not Bluedroid (the classic ESP32 build's
-// stack) — the C6 Arduino core doesn't ship esp_gap_ble_api.h at all, only
-// the NimBLE host headers. NimBLE's RSSI read (ble_gap_conn_rssi) is a
-// direct synchronous call keyed off the connection handle, so there's no
-// async GAP callback to register here like the Bluedroid version needed.
+// This board's BLE stack is NimBLE (not Bluedroid) — RSSI reads are a
+// direct synchronous call (ble_gap_conn_rssi), no async GAP callback needed.
 class ServerCallback : public BLEServerCallbacks {
   void onConnect(BLEServer* srv, ble_gap_conn_desc *desc) {
     Serial.println("Client connected");
@@ -436,29 +334,19 @@ uint8_t to_pct(uint8_t val) {
   return (uint8_t)(val / 255.0f * 100 + 0.5f);
 }
 
-// Reverse-engineer speed tick (-5..+5) from speedThr/speedStep. speedThr==1
-// is the marker for a positive tick (applySpeedTick always sets speedThr=1
-// there and speedStep=tick) — checking speedStep>1 instead used to miss
-// tick==+1 (speedStep=1 there too), which collided with tick==0's encoding
-// and read back as 0.
-int8_t getSpeedTick(const SegSettings &sg) {
-  if (sg.speedThr == 1) return sg.speedStep;          // positive tick
-  return -((int)(sg.speedThr - 2) / 2);               // zero or negative tick
+// Reverse-engineer a tick (-5..+5) from its threshold/step pair (inverse of
+// applyTick above). thr==1 marks a positive tick — checking step>1 instead
+// used to miss tick==+1 (step==1 there too), collapsing it to 0.
+int8_t decodeTick(uint8_t thr, uint8_t step) {
+  if (thr == 1) return step;
+  return -((int)(thr - 2) / 2);
 }
+int8_t getSpeedTick(const SegSettings &sg) { return decodeTick(sg.speedThr, sg.speedStep); }
+int8_t getHueTick(const SegSettings &sg)   { return decodeTick(sg.hueThr, sg.hueStep); }
 
-// Reverse-engineer rainbow hue-cycle tick (-5..+5) from hueThr/hueStep — same
-// fix as getSpeedTick above, same reason.
-int8_t getHueTick(const SegSettings &sg) {
-  if (sg.hueThr == 1) return sg.hueStep;
-  return -((int)(sg.hueThr - 2) / 2);
-}
-
-// Build a state string the webpage can parse on connect.
-// Format: "QA:N,ON:0/1,COLOR:RRGGBB,BRIGHT:pct,BASE:pct,MINBR:pct,MAXBR:pct,SPD:tick,TRAIL:val,WBRIGHT:pct"
-// Written into a caller-supplied fixed buffer via snprintf rather than
-// built with Arduino String concatenation — this runs on every state read
-// (e.g. every reconnect), and repeated String += allocates/frees heap each
-// time, which can fragment memory on a device that stays powered for weeks.
+// Builds the state string the webpage parses on connect/resync.
+// snprintf into a fixed buffer, not String concatenation, to avoid heap
+// fragmentation from repeated allocations on every state read.
 void buildStateString(char *out, size_t outSize) {
   const SegSettings &sg = QA[runQA].seg[0];  // all 3 segs are identical, read seg 0
   snprintf(out, outSize,
@@ -476,18 +364,14 @@ class StateCallback : public BLECharacteristicCallbacks {
   }
 };
 
-// Longest real command is "WAVEBRIGHT:100" (14 chars); this caps well above
-// that so any legitimate write fits, while anything wildly longer — a stray
-// reconnect storm, another BLE client scribbling garbage — gets dropped
-// before it's even parsed instead of costing a String allocation.
+// Comfortably above the longest real command ("WAVEBRIGHT:100"); anything
+// longer is dropped before parsing.
 #define MAX_CMD_LEN 32
 
 class CmdCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) {
-    // getValue() itself hands back one Arduino String (unavoidable — that's
-    // the BLE library's own API); everything downstream copies straight
-    // into a fixed stack buffer instead of chaining more String allocations
-    // (trim/substring), which is what actually added up on every write.
+    // getValue() must return a String (BLE library API); copy into a fixed
+    // stack buffer immediately rather than chaining more String allocations.
     String raw = c->getValue();
     if (raw.length() < 1 || raw.length() >= MAX_CMD_LEN) return;
 
@@ -510,16 +394,10 @@ class CmdCallback : public BLECharacteristicCallbacks {
     // Helper: apply a lambda to all 3 segments of the running QA slot.
     #define FOR_QA_SEGS(BODY) for (int _i=0;_i<3;_i++){ SegSettings &sg = QA[runQA].seg[_i]; BODY }
 
-    if (strcmp(cmd, "PAT") == 0) {
-      FOR_QA_SEGS( sg.pattern = constrain((int)atol(arg), 0, 3); )
-
-    } else if (strcmp(cmd, "COLOR") == 0 || strcmp(cmd, "QACOLOR") == 0) {
+    if (strcmp(cmd, "COLOR") == 0 || strcmp(cmd, "QACOLOR") == 0) {
       long rgb = strtol(arg, NULL, 16);
       uint8_t nr=(rgb>>16)&0xFF, ng=(rgb>>8)&0xFF, nb=rgb&0xFF;
-      // color is universal — apply to ALL 4 QA slots, all segments
-      // (Rainbow ignores r/g/b at render time, but keeping it in sync
-      // avoids a stale color reappearing if Rainbow's pattern is ever
-      // switched back to something color-driven)
+      // color is universal — apply to all 4 QA slots, all segments
       for (int qi=0; qi<4; qi++)
         for (int si=0; si<3; si++) {
           QA[qi].seg[si].r=nr; QA[qi].seg[si].g=ng; QA[qi].seg[si].b=nb;
@@ -536,9 +414,7 @@ class CmdCallback : public BLECharacteristicCallbacks {
       FOR_QA_SEGS( sg.baseBright = min(val, sg.brightness); )
 
     } else if (strcmp(cmd, "MINBR") == 0) {
-      // capped at current max brightness, same pairing as BASE/BRIGHT above —
-      // Breathe's brightness formula subtracts min from max, so ever letting
-      // min exceed max sends that subtraction negative and corrupts the ramp
+      // capped at current max — min must never exceed max (renderBreathe subtracts them)
       uint8_t val = pctTo255(constrain((int)atol(arg), 0, 100));
       FOR_QA_SEGS( sg.minBright = min(val, sg.maxBright); )
 
@@ -561,9 +437,7 @@ class CmdCallback : public BLECharacteristicCallbacks {
       FOR_QA_SEGS( applyHueTick(tick, sg); )
 
     } else if (strcmp(cmd, "QA") == 0) {
-      // run a quick access effect. If neither the outgoing nor incoming
-      // pattern is Rainbow, crossfade smoothly between them (see loop());
-      // Rainbow always switches instantly (see TRANSITION_MS above).
+      // switch pattern; crossfade unless either side is Rainbow (instant then)
       uint8_t newQA = constrain((int)atol(arg), 0, 3);
       if (newQA != runQA) {
         if (runQA != PAT_RAINBOW && newQA != PAT_RAINBOW) {
@@ -587,9 +461,7 @@ class CmdCallback : public BLECharacteristicCallbacks {
       waveBrightScale = constrain((int)atol(arg), 0, 100) / 100.0f;
 
     } else if (strcmp(cmd, "RESET") == 0) {
-      // restore the currently running Quick Access effect (color + all its
-      // sliders) back to its firmware-defined defaults. Other QA slots are
-      // untouched, matching how tuning commands only ever affect runQA.
+      // restore the running Quick Access effect to its firmware defaults
       QA[runQA] = QA_ORIGINAL[runQA];
       waveBrightScale = 1.0f;
     }
@@ -602,27 +474,16 @@ class CmdCallback : public BLECharacteristicCallbacks {
 // SETUP
 // ============================================================
 void setup() {
-  // Drop from the default 160MHz (C6's max, vs 240MHz on the classic ESP32)
-  // down to 80MHz — confirmed a valid CPU frequency step for this board
-  // (Arduino board menu lists 160/80/40/20/10). Same reasoning as the
-  // original ESP32 build: reduces active-mode CPU current for this workload
-  // (LED rendering + a low-traffic BLE peripheral, no WiFi). RMT (LED
-  // timing) and the hardware timer behind millis()/delay() (frame pacing)
-  // both run off clocks independent of this, so they shouldn't be affected —
-  // but per-frame render cost (Rainbow's hsv2rgb_rainbow especially) takes
-  // noticeably longer in wall-clock terms at this speed, so watch actual
-  // frame timing on a real run before trusting this stays inside the
-  // FRAME_INTERVAL_MS budget.
+  // Reduced from the 160MHz default to cut active-mode current (LED
+  // rendering + low-traffic BLE, no WiFi). RMT and millis()/delay() timing
+  // are unaffected, but per-frame render cost is higher in wall-clock terms.
   setCpuFrequencyMhz(80);
 
   Serial.begin(115200);
 
-  // On ESP32, FastLED's WS2812 output should go through the RMT peripheral,
-  // not a bit-banged path that disables interrupts for the ~7ms it takes to
-  // shift out 228 LEDs — that would be long enough to stall the BLE stack
-  // mid-connection-event and cause intermittent disconnects. RMT has been
-  // FastLED's ESP32 default since 3.3.x, but print the version at boot so
-  // that's a known fact for this build, not an assumption.
+  // FastLED must drive WS2812 output via RMT, not a bit-banged path (which
+  // would disable interrupts long enough to stall BLE). Print the version
+  // at boot to confirm rather than assume.
   Serial.printf("FastLED version: %d\n", FASTLED_VERSION);
 
   // LED init
@@ -633,11 +494,8 @@ void setup() {
   fill_solid(leds, NUM_LEDS, CRGB::Black);
   FastLED.show();
 
-  // Every power cycle boots into Waves at its firmware defaults — nothing
-  // is persisted across power loss (there's no physical reset button, so
-  // unplug/replug is the reset gesture; QA[] gets rebuilt fresh from the
-  // DEFAULT TUNING VALUES block below regardless of any live tuning that
-  // was in place before power was lost).
+  // Every power cycle boots into Waves at firmware defaults — nothing
+  // persists across power loss (unplug/replug is the reset gesture).
   runQA  = PAT_WAVES;
   ledsOn = true;
 
@@ -647,8 +505,7 @@ void setup() {
   QA[2] = makeQA(2);    // Default 3: Waves
   QA[3] = makeQA(3);    // Default 4: Rainbow
 
-  // Keep pristine copies for the RESET command — tuning commands (BRIGHT,
-  // BASE, MINBR, MAXBR, SPD, TRAIL, HUESPD, COLOR...) only ever mutate QA[], never this.
+  // Pristine copies for the RESET command — tuning commands only mutate QA[].
   QA_ORIGINAL[0] = QA[0];
   QA_ORIGINAL[1] = QA[1];
   QA_ORIGINAL[2] = QA[2];
@@ -691,32 +548,21 @@ void setup() {
 // ============================================================
 // ANIMATION LOOP
 // ============================================================
-// per-segment animation state
-// ringPosF is a continuous (fractional) LED position rather than a whole
-// index — see renderWavesRing's comment for why. stripHead's equivalent
-// (headF) now lives inside renderWavesStrip as a static local since nothing
-// else needs to read it.
-static float    ringPosF = 0.0f;
-static float    breathePhase[3] = {0.0f, 0.0f, 0.0f};  // one per segment (RingA, Strip, RingB)
+// Continuous (fractional) position state, advanced each frame by dt.
+static float    ringPosF = 0.0f;                       // Waves ring position (Ring A drives, B follows)
+static float    breathePhase[3] = {0.0f, 0.0f, 0.0f};   // one per segment
 static uint32_t lastFrameMs = 0;
 
-// Rainbow pattern phase state — rings (A & B share one wheel position/hue,
-// same idea as ringPosF above) and strip each get their own position phase
-// (driven by Speed) and hue phase (driven by Rainbow Speed); the two are
-// combined additively at render time. Position now accumulates continuously
-// via dt (rbRingPosF/rbStripPosF), the same technique as Waves' ringPosF, so
-// rotation speed is smooth and frame-rate independent instead of hopping a
-// whole hue step only once every speedThr frames. Hue-cycling (Rainbow
-// Speed) stays on the old discrete tick cadence — it's a color-cycle-in-place
-// control, not physical rotation, so there's no Waves equivalent to match it to.
+// Rainbow phase state: position (driven by Speed) and hue (driven by
+// Rainbow Speed) accumulate independently and combine at render time.
+// Rings A/B share one wheel position; strip has its own.
 static float   rbRingPosF = 0.0f;
 static uint8_t rbRingHue = 0, rbRingHueTick = 0;
 static float   rbStripPosF = 0.0f;
 static uint8_t rbStripHue = 0, rbStripHueTick = 0;
 
-// Render one segment's Solid or Breathe pattern (Waves is handled separately
-// per-segment-type in loop(), since ring waves and strip waves use different
-// rendering logic). `phase` is that segment's persistent breathe-cycle state.
+// Renders Solid or Breathe for one segment. `phase` is that segment's
+// persistent breathe-cycle state.
 void renderSegment(uint16_t start, uint16_t count, const SegSettings &sg, float &phase, float dt, CRGB *buf) {
   if (sg.pattern == PAT_SOLID) {
     renderSolid(start, count, sg, buf);
@@ -727,14 +573,10 @@ void renderSegment(uint16_t start, uint16_t count, const SegSettings &sg, float 
   }
 }
 
-// Render one full preset (Ring A + Strip + Ring B) into the given buffer,
-// advancing whichever pattern-specific animation state it needs along the
-// way. Called once per frame normally; called twice during a crossfade (the
-// outgoing preset into ledsPrev, the incoming one into leds — see loop()),
-// which is safe because the outgoing and incoming presets are always
-// different pattern types (each QA slot has a fixed, unique pattern), so
-// they never both touch the same static animation-state variable in the
-// same frame.
+// Renders one full preset (Ring A + Strip + Ring B), advancing whatever
+// animation state it needs. Called twice during a crossfade (outgoing +
+// incoming); safe because every QA slot has a different pattern type, so
+// they never share a static animation variable in the same frame.
 void renderPreset(const Preset &p, float dt, CRGB *buf) {
   const SegSettings &sgA = p.seg[0];   // Ring A
   const SegSettings &sgS = p.seg[1];   // Strip
@@ -748,20 +590,13 @@ void renderPreset(const Preset &p, float dt, CRGB *buf) {
     if (ringPosF < 0.0f) ringPosF += RINGA_LEDS;
     renderWavesRing(RINGA_START, RINGA_LEDS, sgA, ringPosF, false, buf);
   } else if (sgA.pattern == PAT_RAINBOW) {
-    // advance shared wheel position (Ring A drives it, Ring B follows, mirrored) continuously
-    // by dt, same as ringPosF for Waves — smooth motion instead of a per-tick hop. 256 stands
-    // in for "LEDs" in ledsPerSecond()'s math since the wheel position is a hue unit (0-255),
-    // not an LED index.
+    // wheel position advances continuously by dt, same technique as Waves' ringPosF
     rbRingPosF = fmodf(rbRingPosF + ledsPerSecond(sgA) * dt, 256.0f);
     if (rbRingPosF < 0.0f) rbRingPosF += 256.0f;
     if (++rbRingHueTick >= sgA.hueThr)   { rbRingHueTick = 0; rbRingHue += sgA.hueStep; }
-    // Negated, not added: renderRainbowRing bakes hue as startHue + i*deltaHue, so a rising
-    // startHue actually shifts the visible band toward decreasing index — the opposite sense
-    // from Waves, where a rising ringPosF moves the head toward increasing index. Negating the
-    // combined position+hue sum (rather than just position) flips that to match Waves' absolute
-    // direction while still letting position and hue-cycling add constructively — negating only
-    // one term made them cancel to a constant whenever Speed and Rainbow Speed shared the same
-    // tick (e.g. both default to 2), which is what froze the rings entirely.
+    // Negate the combined sum (not just position) to match Waves' rotation direction —
+    // renderRainbowRing's hue formula runs the opposite sense to Waves' index, and negating
+    // only one term let position and hue-cycling cancel out when their ticks matched.
     renderRainbowRing(RINGA_START, RINGA_LEDS, sgA, (uint8_t)(-((int)rbRingHue + (int)rbRingPosF)), buf);
   } else {
     renderSegment(RINGA_START, RINGA_LEDS, sgA, breathePhase[0], dt, buf);
@@ -809,8 +644,7 @@ void renderPreset(const Preset &p, float dt, CRGB *buf) {
 void loop() {
   uint32_t frameStartMs = millis();
 
-  // frame delta time, used to advance breathe phase smoothly regardless of
-  // BLE/RSSI jitter in loop timing
+  // frame delta time, drives smooth animation regardless of loop timing jitter
   float dt = (lastFrameMs == 0) ? 0.0f : (frameStartMs - lastFrameMs) / 1000.0f;
   lastFrameMs = frameStartMs;
 
@@ -827,13 +661,8 @@ void loop() {
     }
   }
 
-  // Once LEDs are off, push the all-black frame exactly once instead of
-  // every 20ms forever — WS2812 holds its last latched value on its own,
-  // so re-sending unchanged black data bought nothing but kept the CPU
-  // fully active the whole time the headset sits powered-on-but-dark.
-  // Idling longer here doesn't hurt responsiveness: BLE writes (including
-  // the ON command that clears this) run in the BLE stack's own task,
-  // independent of loop()'s cadence.
+  // Push the all-black frame once when LEDs turn off, not every 20ms forever
+  // — WS2812 holds its last latched value on its own.
   static bool offFrameSent = false;
   if (!ledsOn) {
     if (!offFrameSent) {
@@ -846,7 +675,7 @@ void loop() {
   }
   offFrameSent = false;
 
-  Preset *p = runningPreset();
+  Preset *p = &QA[runQA];
 
   if (transitioning) {
     uint32_t transElapsedMs = frameStartMs - transitionStartMs;
@@ -854,12 +683,10 @@ void loop() {
       transitioning = false;
       renderPreset(*p, dt, leds);
     } else {
-      // Both patterns render live (with their own animation state advancing)
-      // every frame of the transition, into separate buffers, then get
-      // pixel-blended — a true crossfade rather than a fade-through-black.
-      renderPreset(QA[fromQA], dt, ledsPrev);   // outgoing pattern
-      renderPreset(*p, dt, leds);               // incoming pattern
-      uint8_t amt = (uint8_t)((transElapsedMs * 255UL) / TRANSITION_MS);   // 0=fully outgoing, 255=fully incoming
+      // both patterns render live into separate buffers, then get pixel-blended
+      renderPreset(QA[fromQA], dt, ledsPrev);   // outgoing
+      renderPreset(*p, dt, leds);               // incoming
+      uint8_t amt = (uint8_t)((transElapsedMs * 255UL) / TRANSITION_MS);   // 0=outgoing, 255=incoming
       for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = blend(ledsPrev[i], leds[i], amt);
       }
