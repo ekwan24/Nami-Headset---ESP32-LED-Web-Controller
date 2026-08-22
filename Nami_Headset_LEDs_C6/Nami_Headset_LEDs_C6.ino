@@ -49,7 +49,7 @@ CRGB ledsPrev[NUM_LEDS];  // scratch buffer: holds the outgoing pattern's live r
 #define QA3_PEAK_BRIGHTNESS_PCT  100   // brightness at the head of each wave
 #define QA3_BASE_BRIGHTNESS_PCT  12   // brightness of the background glow
 #define QA3_SPEED_TICK            0   // wave travel speed
-#define QA3_TRAIL_LENGTH         30   // how many LEDs long the fading trail is (1-30)
+#define QA3_TRAIL_LENGTH         20   // how many LEDs long the fading trail is (1-30)
 
 // ---- Default 3 (Waves) specific: Ring B rotation ----
 // 1 = Ring B travels the opposite index direction from Ring A (mirrored
